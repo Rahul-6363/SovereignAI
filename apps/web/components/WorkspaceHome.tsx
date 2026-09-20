@@ -118,49 +118,26 @@ export default function WorkspaceHome({
           </div>
         </header>
 
-        {/* ── hero ─────────────────────────────────────────── */}
-        <section className="mb-8">
-          <h1 className="mb-2 max-w-3xl text-2xl font-semibold leading-snug text-zinc-100">
-            Turn a refinery&apos;s locked filing cabinet into an AI that produces
-            engineering deliverables.
+        {/* ── hero + composer ──────────────────────────────
+            One centred block. The composer is the product's front door, so
+            it sits directly under the sentence that explains it rather than
+            below a row of cards competing for the same attention. */}
+        <section className="mb-12 pt-4">
+          <h1 className="mb-3 max-w-2xl text-[32px] font-medium leading-[1.2] tracking-tight text-zinc-100">
+            Turn a refinery&apos;s locked filing cabinet into an AI that writes
+            your engineering deliverables.
           </h1>
-          <p className="max-w-2xl text-sm leading-relaxed text-zinc-400">
-            With the network cable unplugged and an audit trail that proves
-            nothing left the building. P&amp;ID is a first-class capability of
-            this workspace.
+          <p className="mb-7 max-w-xl text-[15px] leading-relaxed text-zinc-500">
+            With the network cable unplugged, and an audit trail that proves
+            nothing left the building.
           </p>
-        </section>
 
-        {/* ── composer ────────────────────────────────────── */}
-        <section className="mb-8 rounded-2xl border border-ink-700 bg-ink-850 p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-            <span className="font-semibold uppercase tracking-wider">
-              Run in
-            </span>
-            {projects.length > 0 ? (
-              <select
-                value={targetId ?? ""}
-                onChange={(e) => setTargetId(Number(e.target.value))}
-                className="rounded-lg border border-ink-600 bg-ink-900 px-2 py-1 text-[11px] text-zinc-200 focus:border-accent focus:outline-none"
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="text-amber-300">
-                no project yet — create one below
-              </span>
-            )}
-          </div>
           <form
-            className="flex items-end gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               startTask(prompt);
             }}
+            className="rounded-2xl border border-ink-700 bg-ink-850 shadow-lg transition-colors focus-within:border-ink-600"
           >
             <AutoTextarea
               textareaRef={composerRef}
@@ -175,23 +152,46 @@ export default function WorkspaceHome({
               minRows={2}
               maxRows={10}
               placeholder="Describe the task — e.g. draft a change note for CV-104 and check it against DOC-4412"
-              className="flex-1 rounded-xl border border-ink-600 bg-ink-900 px-3.5 py-3 text-sm leading-6 text-zinc-200 placeholder-zinc-600 focus:border-accent focus:outline-none"
+              className="w-full bg-transparent px-4 pb-1 pt-3.5 text-[15px] leading-6 text-zinc-100 placeholder-zinc-600 focus:outline-none"
             />
-            <Button
-              variant="primary"
-              type="submit"
-              disabled={!prompt.trim()}
-              className="h-[52px] shrink-0 px-4"
-            >
-              Start task ↑
-            </Button>
+            <div className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
+              {projects.length > 0 ? (
+                <label className="flex items-center gap-1.5 text-[11px] text-zinc-600">
+                  <span className="pl-1">in</span>
+                  <select
+                    value={targetId ?? ""}
+                    onChange={(e) => setTargetId(Number(e.target.value))}
+                    className="rounded-md bg-ink-900/70 px-2 py-1 text-[11px] text-zinc-300 focus:outline-none"
+                  >
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <span className="pl-1 text-[11px] text-amber-300/90">
+                  no project yet — create one below
+                </span>
+              )}
+              <button
+                type="submit"
+                disabled={!prompt.trim()}
+                title="Start this task"
+                className="ml-auto grid h-8 w-8 place-items-center rounded-lg bg-accent text-sm font-semibold text-white transition-colors hover:bg-accent-soft disabled:bg-ink-700 disabled:text-zinc-600"
+              >
+                ↑
+              </button>
+            </div>
           </form>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
+
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {TASK_STARTERS.map((s) => (
               <button
                 key={s}
                 onClick={() => setPrompt(s)}
-                className="rounded-full border border-ink-600 px-2.5 py-1 text-[11px] text-zinc-400 transition-colors hover:border-accent hover:text-zinc-200"
+                className="rounded-full border border-ink-800 px-3 py-1.5 text-[11px] text-zinc-500 transition-colors hover:border-ink-600 hover:bg-ink-850 hover:text-zinc-300"
               >
                 {s}
               </button>

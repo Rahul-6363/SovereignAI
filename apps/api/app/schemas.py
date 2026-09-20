@@ -176,6 +176,9 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: Optional[int] = None
     retrieval_top_k: int = Field(default=10, ge=1, le=30)
+    # plant | general | code | think. Unknown values fall back to plant
+    # in `normalize_mode` rather than 422-ing a chat turn.
+    mode: str = "plant"
 
 
 class ClaimOut(BaseModel):

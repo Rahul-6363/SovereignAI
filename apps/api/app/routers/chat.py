@@ -115,11 +115,17 @@ async def chat_stream(
                 top_k=body.retrieval_top_k,
                 session_id=session_id,
                 history=history,
+                mode=body.mode,
             ):
                 etype = ev["type"]
                 yield _event(etype, ev)
                 if etype == "token":
                     message_parts.append(ev["text"])
+                elif etype == "replace":
+                    # Output screening rejected what was streamed. The
+                    # persisted turn must be the replacement, not the text
+                    # the UI already discarded.
+                    message_parts = [str(ev.get("text") or "")]
                 elif etype == "done":
                     confidence = ev.get("confidence", 0.0)
                     claims = ev.get("claims", [])

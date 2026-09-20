@@ -33,9 +33,9 @@ export default function Sidebar({
   const relCount = project?.stats.relationships ?? 0;
 
   return (
-    <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-ink-700 bg-ink-950">
+    <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-ink-800 bg-ink-950">
       {/* brand + capability shortcuts */}
-      <div className="flex items-center gap-2 border-b border-ink-700 px-4 py-3">
+      <div className="flex items-center gap-2 border-b border-ink-800 px-4 py-3">
         <span className="grid h-7 w-7 place-items-center rounded-md bg-accent font-bold text-white">
           M
         </span>
@@ -58,7 +58,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      <nav className="border-b border-ink-700 px-3 py-2">
+      <nav className="border-b border-ink-800 px-3 py-2">
         <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
           Capabilities
         </div>
@@ -131,7 +131,7 @@ export default function Sidebar({
       </div>
 
       {/* memory summary */}
-      <div className="border-t border-ink-700 px-4 py-3 text-xs text-zinc-500">
+      <div className="border-t border-ink-800 px-4 py-3 text-xs text-zinc-500">
         <div className="mb-1 font-semibold uppercase tracking-wider text-zinc-500">
           Memory
         </div>

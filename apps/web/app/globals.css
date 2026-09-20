@@ -32,10 +32,20 @@ body {
   background: transparent;
 }
 
-/* Markdown-ish answer blocks */
-.answer-body code {
-  @apply rounded bg-ink-700 px-1 py-0.5 font-mono text-[0.85em] text-amber-300;
+/* Answer typography.
+   Long-form prose at a comfortable measure: the reading column is capped at
+   48rem in the chat pane, which puts a 15px line at roughly 80 characters. */
+.answer-body {
+  text-wrap: pretty;
 }
 .answer-body strong {
   @apply font-semibold text-zinc-100;
+}
+
+/* The composer textarea has no border of its own — the rounded container
+   around it carries the focus ring, so the inner element must not draw a
+   second one on top of it. */
+textarea:focus {
+  outline: none;
+  box-shadow: none;
 }

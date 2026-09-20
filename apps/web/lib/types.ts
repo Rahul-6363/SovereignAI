@@ -353,6 +353,22 @@ export interface ContextReport {
   dropped: string[];
 }
 
+/** Which assistant a turn was addressed to.
+ *
+ *  Not cosmetic: the mode decides whether the backend retrieves from plant
+ *  memory at all, which system prompt it uses and how much room the answer
+ *  gets. It is sent with every turn and echoed back on `done`.
+ */
+export type ChatMode = "plant" | "general" | "code" | "think";
+
+export interface ChatModeSpec {
+  id: ChatMode;
+  label: string;
+  hint: string;
+  placeholder: string;
+  icon: string;
+}
+
 /** ── client-side chat model ──────────────────────────────── */
 export interface ChatMessage {
   id: string;
@@ -376,5 +392,13 @@ export interface ChatMessage {
   stopped?: boolean;
   /** The prompt that produced this turn, so it can be retried verbatim. */
   prompt?: string;
+  /** Which mode produced this turn — retried in the same one. */
+  mode?: ChatMode;
+  /** Think mode's scratchpad, rendered as a collapsible block above the
+   *  answer. Streamed live, then kept so a reopened thread still shows it. */
+  reasoning?: string;
+  /** Set when the request was refused on policy grounds, so the turn is
+   *  presented as a decision rather than as a failure. */
+  refused?: string;
   done: boolean;
 }

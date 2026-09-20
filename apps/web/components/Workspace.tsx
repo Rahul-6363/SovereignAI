@@ -281,33 +281,35 @@ export default function Workspace({
 
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Meshcore capability bar */}
-        <div className="flex items-center gap-1 border-b border-ink-700 bg-ink-900 px-3 py-2">
+        <div className="flex items-center gap-0.5 border-b border-ink-800 bg-ink-900 px-3 py-2">
           <Link
             href="/"
             title="Return to the main Meshcore workspace"
-            className="mr-1 rounded-lg px-2 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-ink-800 hover:text-zinc-100"
+            className="mr-1 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-ink-850 hover:text-zinc-200"
           >
             ← Meshcore
           </Link>
-          <span className="mr-2 h-4 w-px bg-ink-700" />
+          <span className="mr-2 h-4 w-px bg-ink-800" />
           {VIEWS.map(({ id, label }) => (
             <button
               key={id}
               onClick={() => setTab(id)}
               className={cn(
-                "rounded-lg px-3 py-1.5 text-sm",
+                "rounded-lg px-3 py-1.5 text-sm transition-colors",
                 tab === id
-                  ? id === "pid"
-                    ? "bg-accent/20 font-medium text-accent"
-                    : "bg-ink-700 font-medium text-zinc-100"
-                  : "text-zinc-500 hover:bg-ink-800 hover:text-zinc-300",
+                  ? "bg-ink-800 font-medium text-zinc-100"
+                  : "text-zinc-500 hover:bg-ink-850 hover:text-zinc-300",
               )}
             >
               {label}
               {id === "pid" && (
-                <span className="ml-1.5 text-[9px] font-bold uppercase text-emerald-400">
-                  done
-                </span>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "ml-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle",
+                    tab === id ? "bg-accent" : "bg-emerald-500/70",
+                  )}
+                />
               )}
             </button>
           ))}
@@ -366,7 +368,7 @@ export default function Workspace({
           {tab === "pid" && (
             <div className="flex h-full min-h-0 flex-col">
               {/* Boundary banner: this IS the completed P&ID module. */}
-              <div className="flex flex-wrap items-center gap-2 border-b border-ink-700 bg-accent/[0.06] px-4 py-2 text-[11px] text-zinc-400">
+              <div className="flex flex-wrap items-center gap-2 border-b border-ink-800 bg-accent/[0.06] px-4 py-2 text-[11px] text-zinc-400">
                 <span className="text-accent">
                   P&amp;ID capability — completed module.
                 </span>
@@ -481,7 +483,7 @@ function ExplorerPane({
     <div className="flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
         {pages.length > 1 && (
-          <div className="flex items-center gap-2 border-b border-ink-700 bg-ink-900 px-3 py-1.5">
+          <div className="flex items-center gap-2 border-b border-ink-800 bg-ink-900 px-3 py-1.5">
             <Button
               variant="outline"
               className="px-2 py-1 text-xs"
@@ -537,8 +539,8 @@ function ExplorerPane({
         </div>
       </div>
 
-      <div className="flex w-[300px] shrink-0 flex-col border-l border-ink-700 bg-ink-950">
-        <div className="border-b border-ink-700 px-3 py-2">
+      <div className="flex w-[300px] shrink-0 flex-col border-l border-ink-800 bg-ink-950">
+        <div className="border-b border-ink-800 px-3 py-2">
           <div className="mb-2 flex items-baseline gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
               Entities
@@ -642,7 +644,7 @@ function ExplorerPane({
           )}
         </ul>
 
-        <div className="border-t border-ink-700 px-3 py-2 text-[10px] leading-relaxed text-zinc-600">
+        <div className="border-t border-ink-800 px-3 py-2 text-[10px] leading-relaxed text-zinc-600">
           {relationships.length} links detected · click an entity to highlight
           its bbox on the drawing
           {reviewCount > 0 && (

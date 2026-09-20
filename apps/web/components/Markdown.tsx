@@ -92,8 +92,8 @@ export function renderInline(text: string, keyPrefix = ""): React.ReactNode[] {
 /* ── block rendering ────────────────────────────────────────── */
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-ink-700 bg-ink-950">
-      <div className="flex items-center gap-2 border-b border-ink-700 bg-ink-900/60 px-3 py-1.5">
+    <div className="overflow-hidden rounded-xl border border-ink-700 bg-ink-950 text-[13px]">
+      <div className="flex items-center gap-2 border-b border-ink-800 bg-ink-900/60 px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
           {lang || "text"}
         </span>
@@ -140,10 +140,13 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }) {
   );
 }
 
+// Relative to the caller's own size, for the same reason the wrapper no
+// longer sets one: these headings appear both in a full-size answer and in a
+// small folded panel, and a fixed pixel size makes one of the two wrong.
 const HEADING_CLASS: Record<2 | 3 | 4, string> = {
-  2: "mt-1 text-[15px] font-semibold text-zinc-100",
-  3: "mt-1 text-[13.5px] font-semibold text-zinc-200",
-  4: "mt-1 text-[12.5px] font-semibold uppercase tracking-wide text-zinc-400",
+  2: "mt-6 text-[1.15em] font-semibold tracking-tight text-zinc-100",
+  3: "mt-5 text-[1.05em] font-semibold text-zinc-100",
+  4: "mt-4 text-[0.9em] font-semibold uppercase tracking-wide text-zinc-400",
 };
 
 export default function Markdown({
@@ -160,7 +163,7 @@ export default function Markdown({
   return (
     <div
       className={cn(
-        "space-y-3 text-sm leading-relaxed text-zinc-200",
+        "space-y-4 leading-[1.7] [&>*:first-child]:mt-0",
         className,
       )}
     >
@@ -176,12 +179,12 @@ export default function Markdown({
           }
           case "ul":
             return (
-              <ul key={i} className="ml-1 space-y-1">
+              <ul key={i} className="ml-0.5 space-y-1.5">
                 {b.items.map((item, j) => (
                   <li key={j} className="flex gap-2">
                     <span
                       aria-hidden
-                      className="mt-[0.45em] h-1 w-1 shrink-0 rounded-full bg-zinc-600"
+                      className="mt-[0.62em] h-1 w-1 shrink-0 rounded-full bg-zinc-600"
                     />
                     <span className="min-w-0">
                       {renderInline(item, `u${i}-${j}`)}
@@ -192,10 +195,10 @@ export default function Markdown({
             );
           case "ol":
             return (
-              <ol key={i} className="ml-1 space-y-1">
+              <ol key={i} className="ml-0.5 space-y-1.5">
                 {b.items.map((item, j) => (
                   <li key={j} className="flex gap-2">
-                    <span className="shrink-0 font-mono text-[11px] text-zinc-500">
+                    <span className="shrink-0 font-mono text-[0.8em] leading-[1.9] text-zinc-500">
                       {b.start + j}.
                     </span>
                     <span className="min-w-0">
@@ -211,7 +214,7 @@ export default function Markdown({
             return (
               <blockquote
                 key={i}
-                className="border-l-2 border-ink-600 pl-3 text-zinc-400"
+                className="border-l-2 border-ink-600 pl-3.5 text-zinc-400"
               >
                 {renderInline(b.text, `q${i}`)}
               </blockquote>
@@ -219,7 +222,7 @@ export default function Markdown({
           case "table":
             return <Table key={i} head={b.head} rows={b.rows} />;
           case "hr":
-            return <hr key={i} className="border-ink-700" />;
+            return <hr key={i} className="border-ink-800" />;
           default:
             return (
               <p key={i} className="whitespace-pre-wrap">

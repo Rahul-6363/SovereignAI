@@ -1,51 +1,110 @@
 "use client";
-/** Meshcore agent chat — SSE grounded streaming with status, tool/activity
- *  trace, evidence, confidence, attachments and generated deliverables.
+/** Meshcore agent chat — SSE streaming with modes, evidence and deliverables.
  *
- *  README §0.1 / §7 Phase 0: the Claude-like conversation area of the main
- *  workspace. Supports handoff from the home composer (`initialPrompt`), a
- *  restored conversation (`initialConversationId`) and return from the P&ID
- *  capability (`fromPid`).
+ *  Layout follows the shape a conversation actually needs rather than the
+ *  shape a dashboard does: one centred reading column, user turns as compact
+ *  bubbles, assistant turns as unboxed prose at full column width. Chrome
+ *  (evidence, provenance, context budget) sits *under* the answer and stays
+ *  folded until asked for, so the default view of a thread is the thread.
  *
  *  One composer, one button. Asking a question and asking for a file are two
- *  different operations on the backend — one streams a grounded answer, the
- *  other runs the bounded agent and renders an XLSX, DOCX or PDF — but which
- *  one the user wants is already stated in their sentence, so the sentence
- *  decides. There is no Build button and no format picker: "generate an excel
- *  of all instruments" produces a spreadsheet, and the composer says so
- *  before it is sent rather than after.
+ *  different operations on the backend — one streams an answer, the other
+ *  runs the bounded agent and renders an XLSX, DOCX or PDF — but which one
+ *  the user wants is already stated in their sentence, so the sentence
+ *  decides. There is no Build button and no format picker.
+ *
+ *  The mode switcher is the one deliberate exception to "the sentence
+ *  decides". Whether a question should be answered from this plant's
+ *  documents or from the model's own knowledge is genuinely ambiguous in the
+ *  sentence — "how does a relief valve work" is a fair question in either —
+ *  and guessing wrong is expensive in both directions. So it is a choice,
+ *  made once, visible at all times, and remembered.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { streamSSE } from "@/lib/sse";
 import type {
   ActivityStep,
   ChatMessage,
+  ChatMode,
+  ChatModeSpec,
   ContextReport,
   DeliverableRec,
   EvidencePacket,
   EvidenceSource,
 } from "@/lib/types";
-import { AutoTextarea, Badge, Button, ConfidenceBar, CopyButton, Spinner, cn } from "./ui";
+import { AutoTextarea, ConfidenceBar, CopyButton, Spinner, cn } from "./ui";
 import ActivityTrace from "./ActivityTrace";
 import { DeliverableCards } from "./Deliverables";
 import Markdown from "./Markdown";
 
-const STARTERS = [
-  "Trace the process path to P-101.",
-  "What instruments are connected to P-101?",
-  "Build an excel tracker of every instrument.",
-  "Draft a PDF change note for valve CV-104.",
-  "Show uncertain extractions from this drawing.",
+export const CHAT_MODES: ChatModeSpec[] = [
+  {
+    id: "plant",
+    label: "Plant",
+    icon: "◈",
+    hint: "Reads this project's drawings and documents. Cites every plant-specific claim, and builds files on request.",
+    placeholder: "Ask about this plant — or ask for an excel, a document or a PDF…",
+  },
+  {
+    id: "general",
+    label: "General",
+    icon: "✦",
+    hint: "The model's own knowledge. No retrieval and no citations — nothing here is about your plant unless you say so.",
+    placeholder: "Ask anything…",
+  },
+  {
+    id: "code",
+    label: "Code",
+    icon: "⌗",
+    hint: "Writes and reviews code. This workstation is air-gapped, so it sticks to the standard library and what you already have.",
+    placeholder: "Describe what to build, or paste code to review…",
+  },
+  {
+    id: "think",
+    label: "Think",
+    icon: "◍",
+    hint: "Works the problem through visibly before answering. Two passes, so roughly twice the wait.",
+    placeholder: "Give it something worth working through…",
+  },
 ];
+
+const MODE_BY_ID = new Map(CHAT_MODES.map((m) => [m.id, m]));
+const MODE_STORAGE_KEY = "meshcore.chat.mode";
+
+const STARTERS_BY_MODE: Record<ChatMode, string[]> = {
+  plant: [
+    "What instruments are connected to P-101?",
+    "Build an excel tracker of every instrument.",
+    "Draft a PDF change note for valve CV-104.",
+    "Prepare the complete deliverables package for this drawing.",
+  ],
+  general: [
+    "How does a pressure relief valve actually work?",
+    "Explain ISA-5.1 instrument tag numbering.",
+    "What is the difference between a SIS and a BPCS?",
+  ],
+  code: [
+    "Parse a P&ID tag list from CSV into typed records.",
+    "Write a retry decorator with exponential backoff.",
+    "Review this function for edge cases.",
+  ],
+  think: [
+    "Which of our unit's relief scenarios is most likely under-sized, and why?",
+    "Work out a migration plan from the current tag scheme to ISA-5.1.",
+  ],
+};
 
 const STAGE_LABELS: Record<string, string> = {
   session: "Preparing session…",
   intent: "Understanding the question…",
   retrieving: "Searching plant memory…",
   grounding: "Checking P&ID evidence…",
+  thinking: "Working it through…",
   answering: "Writing the answer…",
   intake: "Working out what to build…",
+  policy: "Applying policy…",
+  blocked: "Stopping — output blocked",
   budget: "Stopping — budget spent",
 };
 
@@ -55,6 +114,7 @@ const STAGE_STEPS: Record<string, string> = {
   intent: "Classify intent",
   retrieving: "Retrieve evidence (graph + hybrid index)",
   grounding: "Build grounded evidence packet",
+  thinking: "Reason about the question",
   answering: "Synthesise answer",
 };
 
@@ -64,14 +124,12 @@ const stamp = () => new Date().toLocaleTimeString();
 
 /* ── routing: does this sentence ask for a FILE or for an answer? ──
  *
- * The bar used to be "an action verb AND an artefact noun", which missed the
- * most common phrasing of all — naming the format and nothing else ("an
- * excel of all instruments"). It is now three rules, in order:
+ * Three rules, in order:
  *
  *   1. A question form with no build verb is a question. "What does the
  *      report say about P-101" must not run a 3-minute agent task to hand
  *      back something the user wanted read out.
- *   2. A build verb plus an artefact noun is a build. (The original rule.)
+ *   2. A build verb plus an artefact noun is a build.
  *   3. Naming a concrete file format is a build on its own — nobody types
  *      "xlsx" conversationally.
  *
@@ -96,6 +154,19 @@ export function wantsArtifact(text: string): boolean {
   return FORMAT_WORD.test(t);
 }
 
+/** Only these modes can spend three minutes producing a file.
+ *
+ *  Code mode is the reason this exists: "write a python file that parses the
+ *  tag list" trips every rule in `wantsArtifact`, and routing it to the
+ *  document agent would answer a coding question with an empty spreadsheet.
+ *  Think mode is excluded because its whole point is the visible reasoning,
+ *  which the agent path does not produce.
+ */
+const BUILDING_MODES: ReadonlySet<ChatMode> = new Set<ChatMode>([
+  "plant",
+  "general",
+]);
+
 /** Which file the sentence asks for — mirrors `agent.detect_format`.
  *
  *  Only used for the composer's own label. The backend decides for real; if
@@ -117,9 +188,9 @@ export function detectFormat(text: string): "XLSX" | "DOCX" | "PDF" {
 /** Advance the FIRST unfinished step matching `tool`.
  *
  *  Matching every step whose label starts with the tool name broke any plan
- *  that used a tool twice — the MOC plan retrieves twice — because both rows
- *  went active together and then both went done, so the trace claimed work
- *  that had not happened yet.
+ *  that used a tool twice — the MOC and project plans retrieve twice —
+ *  because both rows went active together and then both went done, so the
+ *  trace claimed work that had not happened yet.
  */
 function advanceStep(
   steps: ActivityStep[],
@@ -199,11 +270,12 @@ export default function ChatPane({
    *  its titles and counts. */
   onConversationChange?: (id: number) => void;
   /** Reports artefacts emitted by the agent so the Deliverables view stays in
-   *  sync with the conversation (README §0.1 "generated deliverables"). */
+   *  sync with the conversation. */
   onDeliverables?: (items: DeliverableRec[]) => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [mode, setMode] = useState<ChatMode>("plant");
   const [streaming, setStreaming] = useState(false);
   const [conversationId, setConversationId] = useState<number | null>(
     initialConversationId,
@@ -219,6 +291,31 @@ export default function ChatPane({
   // Read inside the SSE callbacks, which close over the render that started
   // the stream — the state value there is stale by the second event.
   const conversationRef = useRef<number | null>(initialConversationId);
+  const modeRef = useRef<ChatMode>("plant");
+
+  // The mode is a working preference, not thread state: someone who works in
+  // Code mode should not be dropped back into Plant on every reload.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(MODE_STORAGE_KEY);
+      if (saved && MODE_BY_ID.has(saved as ChatMode)) {
+        setMode(saved as ChatMode);
+        modeRef.current = saved as ChatMode;
+      }
+    } catch {
+      /* storage blocked — the default mode is fine */
+    }
+  }, []);
+
+  const changeMode = useCallback((next: ChatMode) => {
+    setMode(next);
+    modeRef.current = next;
+    try {
+      window.localStorage.setItem(MODE_STORAGE_KEY, next);
+    } catch {
+      /* non-fatal */
+    }
+  }, []);
 
   // Only follow the stream while the user is already at the bottom; otherwise
   // scrolling up to re-read an earlier answer is fought by every new token.
@@ -257,7 +354,7 @@ export default function ChatPane({
     pinnedRef.current = true;
 
     if (!initialConversationId) {
-      setMessages([]);       // "New chat" starts genuinely empty
+      setMessages([]); // "New chat" starts genuinely empty
       setHistoryLoading(false);
       return;
     }
@@ -310,6 +407,7 @@ export default function ChatPane({
       stage,
       activity: [],
       prompt: question,
+      mode: modeRef.current,
       done: false,
     };
     pinnedRef.current = true;
@@ -333,11 +431,12 @@ export default function ChatPane({
       streaming: false,
       stage: undefined,
       stopped: aborted ? true : m.stopped,
-      error: error && !aborted
-        ? error instanceof Error
-          ? error.message
-          : String(error)
-        : m.error,
+      error:
+        error && !aborted
+          ? error instanceof Error
+            ? error.message
+            : String(error)
+          : m.error,
       activity: (m.activity ?? []).map((s) =>
         s.status === "active" || s.status === "pending"
           ? { ...s, status: aborted ? ("failed" as const) : ("done" as const) }
@@ -349,7 +448,7 @@ export default function ChatPane({
     abortRef.current = null;
   };
 
-  // ── grounded answer: streams tokens from the chat endpoint ──────────
+  // ── answer path: streams tokens from the chat endpoint ──────────────
   const submit = async (question: string) => {
     const q = question.trim();
     if (!q || streaming) return;
@@ -359,7 +458,11 @@ export default function ChatPane({
     try {
       await streamSSE(
         `/api/projects/${projectId}/chat`,
-        { message: q, conversation_id: conversationRef.current ?? undefined },
+        {
+          message: q,
+          conversation_id: conversationRef.current ?? undefined,
+          mode: modeRef.current,
+        },
         (ev) => {
           const d = ev.data;
           if (d.conversation_id) setConversation(Number(d.conversation_id));
@@ -385,7 +488,9 @@ export default function ChatPane({
                         detail:
                           stage === "session" && d.conversation_id
                             ? `conversation ${d.conversation_id}`
-                            : undefined,
+                            : d.detail
+                              ? String(d.detail)
+                              : undefined,
                         status: "active" as const,
                         at: stamp(),
                       },
@@ -428,36 +533,30 @@ export default function ChatPane({
                 },
               ],
             }));
-          } else if (ev.event === "tool") {
+          } else if (ev.event === "reasoning") {
             patch((m) => ({
               ...m,
-              activity: [
-                ...(m.activity ?? []),
-                {
-                  id: `t${(m.activity ?? []).length + 1}`,
-                  tool: String(d.tool ?? "unknown"),
-                  label: `Tool: ${String(d.tool ?? "unknown")}`,
-                  detail: d.detail ? String(d.detail) : undefined,
-                  status:
-                    String(d.status ?? "done") === "failed" ? "failed" : "done",
-                  at: stamp(),
-                },
-              ],
+              reasoning: (m.reasoning ?? "") + String(d.text ?? ""),
             }));
           } else if (ev.event === "token") {
             patch((m) => ({ ...m, content: m.content + String(d.text ?? "") }));
+          } else if (ev.event === "replace") {
+            // Output screening rejected what streamed. Replace it rather than
+            // appending, so the rejected text does not stay on screen under
+            // the notice saying it was rejected.
+            patch((m) => ({ ...m, content: String(d.text ?? "") }));
           } else if (ev.event === "done") {
-            const artifacts = (d.artifacts as DeliverableRec[]) ?? [];
-            if (artifacts.length > 0) onDeliverables?.(artifacts);
             patch((m) => ({
               ...m,
               content: String(d.message ?? m.content),
               confidence: Number(d.confidence ?? 0),
               claims: (d.claims as ChatMessage["claims"]) ?? [],
               sources: (d.sources as ChatMessage["sources"]) ?? [],
-              deliverables: artifacts,
               intent: String(d.intent ?? ""),
               model: String(d.model ?? ""),
+              mode: (d.mode as ChatMode) ?? m.mode,
+              reasoning: String(d.reasoning ?? m.reasoning ?? ""),
+              refused: d.refused ? String(d.refused) : undefined,
               context: (d.context as ContextReport) ?? m.context,
               streaming: false,
               stage: undefined,
@@ -505,8 +604,17 @@ export default function ChatPane({
             const stage = String(d.stage ?? "");
             patch((m) => ({
               ...m,
-              stage:
-                String(d.detail ?? "") || STAGE_LABELS[stage] || m.stage,
+              stage: String(d.detail ?? "") || STAGE_LABELS[stage] || m.stage,
+            }));
+          } else if (ev.event === "phases") {
+            // A package run decomposes before it plans. Shown as the turn's
+            // reasoning, which is exactly what it is.
+            const phases = (d.phases as { phase: string; detail: string }[]) ?? [];
+            patch((m) => ({
+              ...m,
+              reasoning: phases
+                .map((p, i) => `${i + 1}. **${p.phase}** — ${p.detail}`)
+                .join("\n"),
             }));
           } else if (ev.event === "plan") {
             const steps = (d.steps as { tool: string; why: string }[]) ?? [];
@@ -575,6 +683,7 @@ export default function ChatPane({
               ...m,
               content: String(d.message ?? m.content),
               deliverables: artifacts,
+              refused: d.refused ? String(d.refused) : undefined,
               streaming: false,
               stage: undefined,
               activity: (m.activity ?? []).map((s) =>
@@ -605,7 +714,9 @@ export default function ChatPane({
   // ── one input, one button ────────────────────────────────────────────
   const send = useCallback(
     (question: string) => {
-      if (wantsArtifact(question)) return runAgentTask(question);
+      if (BUILDING_MODES.has(modeRef.current) && wantsArtifact(question)) {
+        return runAgentTask(question);
+      }
       return submit(question);
     },
     // Both paths read their inputs from refs and arguments, so the identity
@@ -623,7 +734,7 @@ export default function ChatPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPrompt]);
 
-  // ── chat-composer file attachment (README §0.1) ──────────────────────
+  // ── chat-composer file attachment ────────────────────────────────────
   const attach = useCallback(
     async (file: File) => {
       setAttachError("");
@@ -708,20 +819,26 @@ export default function ChatPane({
   const retry = useCallback(() => {
     const prompt = lastAssistant?.prompt;
     if (!prompt || streaming) return;
+    // Retry in the mode that produced it, not whatever is selected now.
+    const previous = modeRef.current;
+    if (lastAssistant?.mode) modeRef.current = lastAssistant.mode;
     void send(prompt);
-  }, [lastAssistant?.prompt, streaming, send]);
+    modeRef.current = previous;
+  }, [lastAssistant?.prompt, lastAssistant?.mode, streaming, send]);
+
+  const spec = MODE_BY_ID.get(mode) ?? CHAT_MODES[0];
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col bg-ink-900">
       {fromPid && (
-        <div className="border-b border-ink-700 bg-accent/[0.06] px-6 py-2 text-[11px] text-zinc-400">
+        <div className="border-b border-ink-800 bg-accent/[0.06] px-6 py-2 text-[11px] text-zinc-400">
           <span className="text-accent">Returned from P&amp;ID.</span> The
           drawing context and extracted plant memory of this project are already
           available to the agent below.
         </div>
       )}
       {historyLoading && (
-        <div className="flex items-center gap-2 border-b border-ink-700 px-6 py-2 text-[11px] text-zinc-500">
+        <div className="flex items-center gap-2 border-b border-ink-800 px-6 py-2 text-[11px] text-zinc-500">
           <Spinner className="h-3 w-3" /> Restoring conversation history…
         </div>
       )}
@@ -731,6 +848,9 @@ export default function ChatPane({
         scrollRef={scrollRef}
         onScroll={onScroll}
         projectId={projectId}
+        spec={spec}
+        onStarter={(s) => send(s)}
+        streaming={streaming}
         retryableId={
           !streaming && lastAssistant?.prompt ? lastAssistant.id : null
         }
@@ -740,9 +860,10 @@ export default function ChatPane({
         input={input}
         setInput={setInput}
         send={send}
+        mode={mode}
+        setMode={changeMode}
         streaming={streaming}
         stop={() => abortRef.current?.abort()}
-        starters={messages.length === 0 ? STARTERS : []}
         attaching={attaching}
         attachError={attachError}
         onAttachClick={() => fileRef.current?.click()}
@@ -763,12 +884,18 @@ export default function ChatPane({
   );
 }
 
+/** The centred reading column every turn is laid out in. */
+const COLUMN = "mx-auto w-full max-w-3xl px-6";
+
 function MessageList({
   messages,
   onEvidence,
   scrollRef,
   onScroll,
   projectId,
+  spec,
+  onStarter,
+  streaming,
   retryableId,
   onRetry,
 }: {
@@ -777,115 +904,273 @@ function MessageList({
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onScroll?: () => void;
   projectId: number;
+  spec: ChatModeSpec;
+  onStarter: (s: string) => void;
+  streaming: boolean;
   retryableId: string | null;
   onRetry: () => void;
 }) {
+  if (messages.length === 0) {
+    return (
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
+        <EmptyThread spec={spec} onStarter={onStarter} streaming={streaming} />
+      </div>
+    );
+  }
+
   return (
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="min-h-0 flex-1 overflow-y-auto px-6 py-4"
+      className="min-h-0 flex-1 overflow-y-auto py-8"
     >
       {messages.map((m) =>
         m.role === "user" ? (
-          <div key={m.id} className="mb-4 flex justify-end animate-fade-in">
-            <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-ink-700 px-4 py-2.5 text-sm text-zinc-100">
-              <span className="whitespace-pre-wrap">{m.content}</span>
-              {m.attachments && m.attachments.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {m.attachments.map((a) => (
-                    <span
-                      key={a.name}
-                      className="rounded-md border border-ink-600 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400"
-                    >
-                      📎 {a.name}
-                    </span>
-                  ))}
-                </div>
-              )}
+          <div key={m.id} className={cn(COLUMN, "mb-6 animate-fade-in")}>
+            <div className="flex justify-end">
+              <div className="max-w-[85%] rounded-2xl rounded-br-md bg-ink-800 px-4 py-2.5 text-[15px] leading-relaxed text-zinc-100">
+                <span className="whitespace-pre-wrap">{m.content}</span>
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {m.attachments.map((a) => (
+                      <span
+                        key={a.name}
+                        className="rounded-md border border-ink-600 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400"
+                      >
+                        {a.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : (
-          <div key={m.id} className="mb-6 animate-fade-in">
-            {m.stage && (
-              <div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">
-                <Spinner className="h-3 w-3" />
-                {m.stage}
-              </div>
-            )}
-            <ActivityTrace steps={m.activity ?? []} />
-            {m.content && <Markdown text={m.content} />}
-            {/* A caret while the model is mid-sentence, so a slow local model
-                is visibly working rather than apparently finished. */}
-            {m.streaming && (
-              <span
-                aria-hidden
-                className="ml-0.5 inline-block h-4 w-[2px] translate-y-[3px] animate-pulse-dot bg-accent"
-              />
-            )}
-            {m.stopped && (
-              <p className="mt-2 text-[11px] italic text-zinc-500">
-                Stopped. The answer above is incomplete.
-              </p>
-            )}
-            {m.deliverables && m.deliverables.length > 0 && (
-              <DeliverableCards
-                items={m.deliverables}
-                compact
-                projectId={projectId}
-              />
-            )}
-            {m.error && (
-              <div className="mt-2 rounded-lg border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">
-                {m.error}
-              </div>
-            )}
-            {m.evidence && (
-              <EvidenceChips packet={m.evidence} onEvidence={onEvidence} />
-            )}
-            {m.done && m.confidence !== undefined && (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Badge color="violet">intent: {m.intent || "—"}</Badge>
-                <Badge color="zinc">model: {m.model || "—"}</Badge>
-                <div className="w-40">
-                  <ConfidenceBar value={m.confidence} />
-                </div>
-              </div>
-            )}
-            {m.done && (m.content || m.error) && (
-              <div className="mt-2 flex items-center gap-1">
-                {m.content && <CopyButton text={m.content} />}
-                {m.id === retryableId && (
-                  <button
-                    onClick={onRetry}
-                    title="Run this question again"
-                    className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-500 transition-colors hover:bg-ink-800 hover:text-zinc-300"
-                  >
-                    ↻ Retry
-                  </button>
-                )}
-                {m.context && <ContextBadge report={m.context} />}
-              </div>
-            )}
-            {m.done && <WhyThisAnswer message={m} />}
-          </div>
+          <AssistantTurn
+            key={m.id}
+            m={m}
+            onEvidence={onEvidence}
+            projectId={projectId}
+            retryable={m.id === retryableId}
+            onRetry={onRetry}
+          />
         ),
       )}
-      {messages.length === 0 && (
-        <div className="grid h-full place-items-center text-center">
-          <div>
-            <div className="mb-1 text-lg font-medium text-zinc-300">
-              Ask about this plant
-            </div>
-            <p className="max-w-md text-sm text-zinc-500">
-              Answers are grounded in extracted plant memory with visible
-              evidence, and the activity trace shows how each one was produced.
-              Ask for a spreadsheet, a document or a PDF and it gets built and
-              filed under Deliverables.
-            </p>
-          </div>
+    </div>
+  );
+}
+
+/** One assistant turn: reasoning, trace, answer, then the evidence chrome. */
+function AssistantTurn({
+  m,
+  onEvidence,
+  projectId,
+  retryable,
+  onRetry,
+}: {
+  m: ChatMessage;
+  onEvidence: (src: EvidenceSource) => void;
+  projectId: number;
+  retryable: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div className={cn(COLUMN, "group mb-10 animate-fade-in")}>
+      {m.stage && (
+        <div className="mb-3 flex items-center gap-2 text-xs text-zinc-500">
+          <Spinner className="h-3 w-3" />
+          {m.stage}
         </div>
       )}
+
+      {m.reasoning && (
+        <ReasoningBlock text={m.reasoning} live={Boolean(m.streaming)} />
+      )}
+
+      {(m.activity?.length ?? 0) > 0 && <TraceDisclosure steps={m.activity!} />}
+
+      {m.refused && (
+        <div className="mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-amber-400/90">
+          <span aria-hidden>▲</span> Declined on policy
+        </div>
+      )}
+
+      {m.content && (
+        <div className="answer-body text-[15px] leading-[1.7] text-zinc-200">
+          <Markdown text={m.content} />
+        </div>
+      )}
+
+      {/* A caret while the model is mid-sentence, so a slow local model is
+          visibly working rather than apparently finished. */}
+      {m.streaming && (
+        <span
+          aria-hidden
+          className="ml-0.5 inline-block h-4 w-[2px] translate-y-[3px] animate-pulse-dot bg-accent"
+        />
+      )}
+
+      {m.stopped && (
+        <p className="mt-3 text-[11px] italic text-zinc-500">
+          Stopped. The answer above is incomplete.
+        </p>
+      )}
+
+      {m.deliverables && m.deliverables.length > 0 && (
+        <DeliverableCards items={m.deliverables} compact projectId={projectId} />
+      )}
+
+      {m.error && (
+        <div className="mt-3 rounded-xl border border-rose-900/50 bg-rose-950/30 px-3.5 py-2.5 text-xs text-rose-300">
+          {m.error}
+        </div>
+      )}
+
+      {m.evidence && <EvidenceChips packet={m.evidence} onEvidence={onEvidence} />}
+
+      {/* Hover actions, Claude-style: present but not competing with the
+          answer until the pointer is in the turn. Keyboard focus reveals
+          them too, so they are not pointer-only affordances. */}
+      {m.done && (m.content || m.error) && (
+        <div className="mt-3 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          {m.content && <CopyButton text={m.content} />}
+          {retryable && (
+            <button
+              onClick={onRetry}
+              title="Run this question again"
+              className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-500 transition-colors hover:bg-ink-800 hover:text-zinc-300"
+            >
+              ↻ Retry
+            </button>
+          )}
+          {m.mode && m.mode !== "plant" && (
+            <span className="rounded-md px-1.5 py-0.5 font-mono text-[10px] text-zinc-600">
+              {MODE_BY_ID.get(m.mode)?.label ?? m.mode}
+            </span>
+          )}
+          {m.confidence !== undefined && m.confidence > 0 && (
+            <span className="ml-1 w-28">
+              <ConfidenceBar value={m.confidence} />
+            </span>
+          )}
+          {m.context && <ContextBadge report={m.context} />}
+        </div>
+      )}
+
+      {m.done && <WhyThisAnswer message={m} />}
+    </div>
+  );
+}
+
+/** Think mode's scratchpad — folded by default, like extended thinking.
+ *
+ *  Expanded while it streams, because watching it is the point of asking for
+ *  it; collapsed once the answer arrives, because by then the answer is.
+ */
+function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
+  const [open, setOpen] = useState(live);
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (wasLive.current && !live) setOpen(false);
+    wasLive.current = live;
+  }, [live]);
+
+  return (
+    <div className="mb-4 rounded-xl border border-ink-800 bg-ink-850/50">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-[11px] font-medium text-zinc-400 transition-colors hover:text-zinc-200"
+      >
+        <span className={cn("text-accent", live && "animate-pulse-dot")}>◍</span>
+        {live ? "Thinking…" : "Thought process"}
+        <span className="ml-auto text-zinc-600">{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-ink-800 px-3.5 py-2.5 text-[13px] leading-relaxed text-zinc-500">
+          <Markdown text={text} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The tool trace, folded. It is evidence of *how*, not part of the answer.
+ *
+ *  It used to render expanded above every turn, which meant the first thing
+ *  in the reading column was a list of internal step names — useful once,
+ *  noise on the forty-first answer.
+ */
+function TraceDisclosure({ steps }: { steps: ActivityStep[] }) {
+  const [open, setOpen] = useState(false);
+  const running = steps.some((s) => s.status === "active" || s.status === "pending");
+  const failed = steps.filter((s) => s.status === "failed").length;
+  const done = steps.filter((s) => s.status === "done").length;
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded-md text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
+      >
+        <span className={cn(failed ? "text-rose-400" : "text-zinc-600")}>
+          {running ? "◌" : failed ? "✕" : "✓"}
+        </span>
+        {running
+          ? `${done}/${steps.length} steps`
+          : failed
+            ? `${steps.length} steps · ${failed} failed`
+            : `${steps.length} steps`}
+        <span className="text-zinc-700">{open ? "hide" : "show work"}</span>
+      </button>
+      {open && <ActivityTrace steps={steps} className="mt-2" />}
+    </div>
+  );
+}
+
+/** The screen a thread starts on. */
+function EmptyThread({
+  spec,
+  onStarter,
+  streaming,
+}: {
+  spec: ChatModeSpec;
+  onStarter: (s: string) => void;
+  streaming: boolean;
+}) {
+  return (
+    <div className="flex min-h-full items-center">
+      <div className={cn(COLUMN, "py-12")}>
+        <div className="mb-2 flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/15 text-base text-accent">
+            {spec.icon}
+          </span>
+          <h2 className="text-2xl font-medium tracking-tight text-zinc-100">
+            {spec.label} mode
+          </h2>
+        </div>
+        <p className="mb-6 max-w-xl text-[15px] leading-relaxed text-zinc-500">
+          {spec.hint}
+        </p>
+        <div className="flex flex-col items-start gap-1.5">
+          {STARTERS_BY_MODE[spec.id].map((s) => (
+            <button
+              key={s}
+              onClick={() => onStarter(s)}
+              disabled={streaming}
+              className="group/s flex w-full items-center gap-2 rounded-xl border border-ink-800 px-3.5 py-2.5 text-left text-sm text-zinc-400 transition-colors hover:border-ink-600 hover:bg-ink-850 hover:text-zinc-200 disabled:opacity-40"
+            >
+              <span className="min-w-0 flex-1">{s}</span>
+              <span className="shrink-0 text-zinc-700 transition-colors group-hover/s:text-accent">
+                →
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -911,8 +1196,8 @@ function ContextBadge({ report }: { report: ContextReport }) {
         ctx {pct}% · {report.evidence_kept}/{report.evidence_total} src
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 z-10 mb-1 w-72 rounded-lg border border-ink-700 bg-ink-850 p-2.5 text-left shadow-lg">
-          <div className="mb-1 text-[11px] font-semibold text-zinc-300">
+        <div className="absolute bottom-full right-0 z-10 mb-1 w-72 rounded-xl border border-ink-700 bg-ink-850 p-3 text-left shadow-xl">
+          <div className="mb-1.5 text-[11px] font-semibold text-zinc-300">
             Context window
           </div>
           <dl className="space-y-0.5 text-[11px] text-zinc-500">
@@ -943,7 +1228,7 @@ function ContextBadge({ report }: { report: ContextReport }) {
             </div>
           </dl>
           {report.dropped.length > 0 && (
-            <ul className="mt-1.5 space-y-0.5 border-t border-ink-700 pt-1.5 text-[11px] text-amber-400/80">
+            <ul className="mt-2 space-y-0.5 border-t border-ink-800 pt-2 text-[11px] text-amber-400/80">
               {report.dropped.map((d, i) => (
                 <li key={i}>· {d}</li>
               ))}
@@ -979,7 +1264,7 @@ function EvidenceChips({
           key={i}
           onClick={() => onEvidence(c)}
           title={c.text ?? ""}
-          className="rounded-lg border border-ink-600 bg-ink-850 px-2 py-1 text-left text-[11px] text-zinc-300 transition-colors hover:border-accent hover:text-zinc-100"
+          className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-1 text-left text-[11px] text-zinc-300 transition-colors hover:border-accent hover:text-zinc-100"
         >
           {c.source_type === "graph" ? (
             <span>
@@ -994,7 +1279,8 @@ function EvidenceChips({
               </span>
               {c.document && (
                 <span className="text-zinc-500">
-                  {" "}· {c.document}
+                  {" "}
+                  · {c.document}
                   {c.page ? ` p${c.page}` : ""}
                 </span>
               )}
@@ -1025,8 +1311,8 @@ function EvidenceSection({
   const ctx = packet.answer_context ?? [];
   if (ctx.length === 0) return null;
   return (
-    <div className="mt-3 rounded-lg border border-ink-700/70 bg-ink-850/40 p-2.5">
-      <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+    <div className="mt-4 rounded-xl border border-ink-800 bg-ink-850/40 p-3">
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
           Evidence
         </span>
@@ -1065,12 +1351,12 @@ function WhyThisAnswer({ message }: { message: ChatMessage }) {
     <div className="mt-2">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline"
+        className="text-xs text-zinc-600 underline-offset-2 hover:text-zinc-400 hover:underline"
       >
         {open ? "Hide provenance" : "Why this answer?"}
       </button>
       {open && (
-        <div className="mt-2 space-y-3 rounded-lg border border-ink-700 bg-ink-850 p-3 text-xs">
+        <div className="mt-2 space-y-3 rounded-xl border border-ink-800 bg-ink-850 p-3.5 text-xs">
           <div>
             <div className="mb-1 font-semibold text-zinc-400">Claims</div>
             <ul className="space-y-1">
@@ -1091,7 +1377,7 @@ function WhyThisAnswer({ message }: { message: ChatMessage }) {
               {sources.map((s, i) => (
                 <li key={i} className="text-zinc-500">
                   {s.source_type === "graph"
-                    ? s.relation ?? "graph link"
+                    ? (s.relation ?? "graph link")
                     : `${s.document || "unknown"}${s.page ? ` · page ${s.page}` : ""}`}
                 </li>
               ))}
@@ -1104,13 +1390,20 @@ function WhyThisAnswer({ message }: { message: ChatMessage }) {
   );
 }
 
+/** The composer: one box, controls inside it.
+ *
+ *  The mode pills live in the same rounded container as the textarea rather
+ *  than in a toolbar above it, because the mode is part of what you are about
+ *  to send — the same reason the send button is in there and not beside it.
+ */
 function Composer({
   input,
   setInput,
   send,
+  mode,
+  setMode,
   streaming,
   stop,
-  starters,
   attaching,
   attachError,
   onAttachClick,
@@ -1120,18 +1413,20 @@ function Composer({
   setInput: (v: string) => void;
   /** Routes to an answer or a build, whichever the sentence asks for. */
   send: (q: string) => void;
+  mode: ChatMode;
+  setMode: (m: ChatMode) => void;
   streaming: boolean;
   stop: () => void;
-  starters: string[];
   attaching: boolean;
   attachError: string;
   onAttachClick: () => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   // Shown live, so the routing decision is never a surprise after the fact.
-  const willBuild = wantsArtifact(input);
+  const willBuild = BUILDING_MODES.has(mode) && wantsArtifact(input);
   const format = willBuild ? detectFormat(input) : null;
   const empty = input.trim() === "";
+  const spec = MODE_BY_ID.get(mode) ?? CHAT_MODES[0];
 
   // Focus returns to the composer the moment a turn ends, so a follow-up is
   // typed rather than clicked-then-typed.
@@ -1139,100 +1434,154 @@ function Composer({
     if (!streaming) textareaRef.current?.focus();
   }, [streaming, textareaRef]);
 
+  const footnote = useMemo(() => {
+    if (willBuild)
+      return `Reading this as a file request — it will run the agent and produce a ${format} you can download here and in Deliverables.`;
+    if (mode === "plant")
+      return "Grounded in this project's drawings and documents · 100% local";
+    if (mode === "code")
+      return "Air-gapped: no package downloads, so answers stay on the standard library and what you have.";
+    if (mode === "think")
+      return "Two passes — the reasoning streams first, then the answer.";
+    return "General knowledge · not about your plant unless you say so · 100% local";
+  }, [willBuild, format, mode]);
+
   return (
-    <div className="border-t border-ink-700 bg-ink-950/80 px-6 py-4">
-      {starters.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {starters.map((s) => (
-            <button
-              key={s}
-              onClick={() => send(s)}
-              disabled={streaming}
-              className="rounded-full border border-ink-600 px-3 py-1 text-xs text-zinc-400 transition-colors hover:border-accent hover:text-zinc-200 disabled:opacity-40"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-      <form
-        className="flex items-end gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!streaming) send(input);
-        }}
-      >
-        <button
-          type="button"
-          onClick={onAttachClick}
-          disabled={attaching || streaming}
-          title="Attach a PDF or drawing to this project"
-          className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-xl border border-ink-600 text-zinc-400 transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
-        >
-          {attaching ? <Spinner className="h-4 w-4" /> : "📎"}
-        </button>
-        <AutoTextarea
-          value={input}
-          onChange={setInput}
-          textareaRef={textareaRef}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (!streaming) send(input);
-            }
+    <div className="border-t border-ink-800 bg-ink-900 pb-4 pt-3">
+      <div className={COLUMN}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!streaming) send(input);
           }}
-          maxRows={8}
-          placeholder={
-            streaming
-              ? "Working… press Stop to interrupt"
-              : "Ask anything, or ask for an excel, a document or a PDF…"
-          }
           className={cn(
-            "min-h-[42px] flex-1 rounded-xl border bg-ink-850 px-3.5 py-2.5 text-sm leading-6 text-zinc-200 placeholder-zinc-600 focus:outline-none",
+            "rounded-2xl border bg-ink-850 shadow-lg transition-colors",
             streaming
-              ? "border-ink-700 opacity-60"
+              ? "border-ink-800 opacity-70"
               : willBuild
-                ? "border-accent/60 focus:border-accent"
-                : "border-ink-600 focus:border-accent",
+                ? "border-accent/50 focus-within:border-accent"
+                : "border-ink-700 focus-within:border-ink-600",
           )}
-        />
-        {streaming ? (
-          <Button variant="outline" onClick={stop} title="Stop generating">
-            ■ Stop
-          </Button>
-        ) : (
-          <Button
-            variant="primary"
-            type="submit"
-            disabled={empty}
-            title={
-              willBuild
-                ? `Build a ${format} and file it under Deliverables`
-                : "Send"
+        >
+          <AutoTextarea
+            value={input}
+            onChange={setInput}
+            textareaRef={textareaRef}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!streaming) send(input);
+              }
+            }}
+            minRows={1}
+            maxRows={12}
+            placeholder={
+              streaming ? "Working… press Stop to interrupt" : spec.placeholder
             }
+            className="w-full bg-transparent px-4 pb-1 pt-3.5 text-[15px] leading-6 text-zinc-100 placeholder-zinc-600 focus:outline-none"
+          />
+
+          <div className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
+            <button
+              type="button"
+              onClick={onAttachClick}
+              disabled={attaching || streaming}
+              title="Attach a PDF or drawing to this project"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-ink-800 hover:text-accent disabled:opacity-40"
+            >
+              {attaching ? <Spinner className="h-4 w-4" /> : "+"}
+            </button>
+
+            <ModeSwitch mode={mode} setMode={setMode} disabled={streaming} />
+
+            <div className="ml-auto flex items-center gap-2">
+              {willBuild && (
+                <span className="hidden shrink-0 rounded-md bg-accent/15 px-2 py-1 font-mono text-[10px] text-accent sm:block">
+                  → {format}
+                </span>
+              )}
+              {streaming ? (
+                <button
+                  type="button"
+                  onClick={stop}
+                  title="Stop generating"
+                  className="grid h-8 w-8 place-items-center rounded-lg border border-ink-600 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100"
+                >
+                  ■
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={empty}
+                  title={
+                    willBuild
+                      ? `Build a ${format} and file it under Deliverables`
+                      : "Send"
+                  }
+                  className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-sm font-semibold text-white transition-colors hover:bg-accent-soft disabled:bg-ink-700 disabled:text-zinc-600"
+                >
+                  ↑
+                </button>
+              )}
+            </div>
+          </div>
+        </form>
+
+        {attachError && (
+          <p className="mt-1.5 text-[11px] text-rose-400">{attachError}</p>
+        )}
+        <p
+          className={cn(
+            "mt-2 text-center text-[11px] leading-relaxed",
+            willBuild ? "text-accent/90" : "text-zinc-600",
+          )}
+        >
+          {footnote}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** Segmented mode control. */
+function ModeSwitch({
+  mode,
+  setMode,
+  disabled,
+}: {
+  mode: ChatMode;
+  setMode: (m: ChatMode) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Chat mode"
+      className="flex items-center gap-0.5 rounded-lg bg-ink-900/70 p-0.5"
+    >
+      {CHAT_MODES.map((m) => {
+        const active = m.id === mode;
+        return (
+          <button
+            key={m.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            disabled={disabled}
+            onClick={() => setMode(m.id)}
+            title={m.hint}
+            className={cn(
+              "rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50",
+              active
+                ? "bg-ink-700 text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-300",
+            )}
           >
-            {willBuild ? `⚙ Create ${format}` : "↑ Send"}
-          </Button>
-        )}
-      </form>
-      {attachError && (
-        <p className="mt-1.5 text-[11px] text-rose-400">{attachError}</p>
-      )}
-      <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">
-        {willBuild ? (
-          <span className="text-accent">
-            Reading this as a file request — it will run the agent and produce a{" "}
-            {format} you can download here and in Deliverables. Say “as a PDF”
-            or “as a spreadsheet” to change the format.
-          </span>
-        ) : (
-          <>
-            Answers are grounded in this project&apos;s drawings and documents.
-            Ask for a spreadsheet, a document or a PDF and one gets built. 📎
-            attaches a drawing · 100% local
-          </>
-        )}
-      </p>
+            <span className="mr-1 text-[10px] text-accent">{m.icon}</span>
+            {m.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

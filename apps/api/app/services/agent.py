@@ -30,7 +30,7 @@ from typing import Any, AsyncIterator, Optional
 
 from sqlmodel import Session
 
-from app.services import audit, tools
+from app.services import audit, safety, tools
 from app.services.calc_engine import list_operations
 from app.services.tools import ToolContext, ToolResult
 
@@ -94,6 +94,11 @@ TASK_GENERAL_DOC = "GENERAL_DOCUMENT"
 # record — "a PDF report on P-101". Grounded like a tracker, prose like an
 # MOC note, and previously not covered by either.
 TASK_GROUNDED_DOC = "GROUNDED_DOCUMENT"
+# "Do the whole thing" — a work package rather than one file. Its own
+# task because it is the only one that plans several artefacts in one run
+# and has to sequence them: the register is built first so the report can
+# reference what is actually in it.
+TASK_PROJECT = "PROJECT_PACKAGE"
 
 _TAG_RE = re.compile(r"\b([A-Z]{1,5}[- ]?\d{2,5}[A-Z]?)\b")
 
@@ -121,6 +126,27 @@ _PLANT_SUBJECT_RE = re.compile(
     r"|\b[A-Z]{1,5}-\d{2,5}[A-Z]?\b",
     re.I,
 )
+
+# ── "do the whole project" ────────────────────────────────────
+# Distinct from every other task in one way that matters: it is a request for
+# a SET of deliverables, so it plans several renders and sequences them. The
+# pattern is deliberately narrow. A project run costs most of the tool budget
+# and several minutes on a CPU, so it fires only when the request says
+# "complete"/"full"/"end to end" about a package of work — never as a
+# fallback for a request that was merely broad.
+_PROJECT_RE = re.compile(
+    r"\b(complete|full|entire|whole|comprehensive|end[-\s]?to[-\s]?end)\s+"
+    r"(project|package|work[-\s]?package|deliverables?|"
+    r"handover|documentation|document\s+set|study|review|audit|analysis)\b"
+    r"|\b(deliverable|document)\s+(set|package)\b"
+    r"|\bfull\s+set\s+of\b"
+    r"|\b(do|handle|take\s+care\s+of|execute)\s+(the\s+)?"
+    r"(whole|entire|complete|full)\s+(thing|job|project|task|package)\b"
+    r"|\beverything\s+(you\s+can\s+)?(for|about|on)\s+this\s+"
+    r"(project|plant|drawing|unit)\b",
+    re.I,
+)
+
 
 # ── FORMAT: which file the sentence is asking for ─────────────
 # There is no format picker in the UI and there should not be one: the user
@@ -190,6 +216,12 @@ def classify_task(prompt: str) -> str:
     wants_file = bool(_ARTIFACT_RE.search(text))
     about_plant = bool(_PLANT_SUBJECT_RE.search(text))
 
+    # Checked first and gated on plant subject matter. Ungated, "write the
+    # complete documentation for my python package" would spend the whole
+    # tool budget retrieving P&ID evidence that cannot exist for it.
+    if _PROJECT_RE.search(text) and about_plant:
+        return TASK_PROJECT
+
     # A file request with no plant subject in it cannot be answered from plant
     # memory, so it takes the general path instead of returning an empty
     # tracker. This is checked first: "make a spreadsheet of the top vision
@@ -257,6 +289,7 @@ _DEFAULT_FORMAT_BY_TASK = {
     TASK_CALC: FORMAT_DOCX,
     TASK_GENERAL_DOC: FORMAT_DOCX,
     TASK_GROUNDED_DOC: FORMAT_DOCX,
+    TASK_PROJECT: FORMAT_DOCX,
 }
 
 # Which deferred-argument builder shapes the content for a given format.
@@ -323,6 +356,29 @@ def build_plan(
                 PlannedCall(renderer, {"_defer": "grounded_doc"},
                             f"Render the {fmt.upper()} from the evidence"))
         return plan
+    if task == TASK_PROJECT:
+        # Ordered, not merely listed. The register is rendered before the
+        # report so the report can state how many rows it actually contains
+        # and cite it as a companion file; running them in the other order
+        # would mean the report describes a file that does not exist yet.
+        return [
+            PlannedCall("retrieve", {"query": search, "top_k": 14},
+                        "Survey what this project holds on the subject"),
+            PlannedCall("list_entities",
+                        {"entity_type": _wanted_type(prompt),
+                         "page": _wanted_page(prompt)},
+                        "Inventory the tagged items"),
+            PlannedCall("render_xlsx", {"_defer": "tracker"},
+                        "Render the tag register (XLSX)"),
+            PlannedCall("retrieve",
+                        {"query": (tag + " relief valve interlock alarm "
+                                   "protective device safety").strip(),
+                         "top_k": 10},
+                        "Gather the protective devices and safeguards"),
+            PlannedCall(renderer, {"_defer": "project_report"},
+                        "Render the engineering report ("
+                        + fmt.upper() + ")"),
+        ]
     if task == TASK_TRACKER:
         return [
             PlannedCall("list_entities",
@@ -344,6 +400,47 @@ def build_plan(
     return [
         PlannedCall("retrieve", {"query": search, "top_k": 10},
                     "Retrieve grounded evidence"),
+    ]
+
+
+def project_phases(prompt: str, tag: str) -> list[dict]:
+    """The decomposition shown before a project run starts.
+
+    A five-step plan that takes minutes needs to say what it is doing and
+    why before it does it, or the wait reads as a hang. This is the "think"
+    the user asked for, and it is deterministic for the same reason the plan
+    is: a decomposition that varies run to run cannot be audited.
+    """
+    subject = tag or "this project"
+    return [
+        {
+            "phase": "Understand",
+            "detail": "Read what plant memory already holds on "
+                      + subject
+                      + ", so the package is built from evidence rather "
+                        "than from assumptions.",
+        },
+        {
+            "phase": "Inventory",
+            "detail": "Enumerate every tagged item with its document, page "
+                      "and extraction confidence.",
+        },
+        {
+            "phase": "Register",
+            "detail": "Render the tag register as a spreadsheet — the "
+                      "tabular half of the package.",
+        },
+        {
+            "phase": "Safeguards",
+            "detail": "Retrieve the protective devices and safety-related "
+                      "connections separately; they are what a reviewer "
+                      "checks first.",
+        },
+        {
+            "phase": "Report",
+            "detail": "Render the engineering report, citing the register "
+                      "and every source behind it.",
+        },
     ]
 
 
@@ -691,6 +788,86 @@ _UNVERIFIED_NOTE = (
 )
 
 
+def _project_report_args(
+    prompt: str,
+    tag: str,
+    evidence: list[dict],
+    entities: list[dict],
+    companions: list[dict],
+) -> dict:
+    """The report half of a project package.
+
+    Built on `_grounded_doc_args` rather than beside it: the two documents
+    would otherwise drift, and a package whose report contradicts its own
+    register is worse than either file alone. What this adds is the package
+    framing — a scope section, the inventory summary, and a manifest naming
+    the companion files so the report is usable on its own.
+    """
+    base = _grounded_doc_args(prompt, tag, evidence)
+    sections = list(base["sections"])
+    subject = tag or "this project"
+
+    by_type: dict[str, int] = {}
+    review = 0
+    for item in entities:
+        key = str(item.get("type") or "unclassified")
+        by_type[key] = by_type.get(key, 0) + 1
+        if item.get("needs_review"):
+            review += 1
+
+    scope = {
+        "heading": "Scope of this package",
+        "body": (
+            f"Requested: {prompt.strip()}\n\n"
+            f"This package covers {subject} as represented in this project's "
+            "ingested drawings and documents. It is assembled entirely on "
+            "this workstation from extracted plant memory; no content came "
+            "from an external service and none of it was written by a "
+            "language model."
+        ),
+    }
+
+    inventory_bullets = [
+        f"{count} {name}{'s' if count != 1 else ''}"
+        for name, count in sorted(by_type.items())
+    ]
+    if review:
+        inventory_bullets.append(
+            f"{review} item(s) flagged by the validation rules as needing "
+            "review before use"
+        )
+    inventory = {
+        "heading": "Inventory summary",
+        "bullets": inventory_bullets
+        or ["No tagged items were extracted for this subject."],
+    }
+
+    manifest = {
+        "heading": "Package contents",
+        "bullets": [
+            f"{a.get('name', '')} — {a.get('citations', 0)} citation(s)"
+            for a in companions
+        ]
+        + [f"This report — {len(evidence)} retrieved source(s)"],
+    }
+
+    # The scope leads; the summary and manifest sit after the evidence but
+    # before the review boilerplate, which stays last by construction.
+    sections = [scope] + sections[:-1] + [inventory, manifest, sections[-1]]
+    # `_grounded_doc_args` numbers its own headings from 1. Inserting around
+    # them leaves "1. Request" sitting under "0. Scope", so the whole run is
+    # renumbered once, here, after every section is in its final position.
+    for i, section in enumerate(sections, start=1):
+        heading = re.sub(r"^\d+\.\s*", "", str(section.get("heading", "")))
+        section["heading"] = f"{i}. {heading}"
+
+    return {
+        "title": prompt.strip()[:60] or f"Engineering package — {subject}",
+        "subtitle": f"Work package — {subject}",
+        "sections": sections,
+    }
+
+
 def _general_table_args(prompt: str, drafted: dict) -> dict:
     """Shape a drafted table for `render_xlsx`.
 
@@ -904,6 +1081,37 @@ async def run_agent(
     budget = AgentBudget()
     ctx = ToolContext(session, state, project_id, out_dir, clearance)
 
+    # ── POLICY, before INTAKE ─────────────────────────────────
+    # Screened here rather than only in the chat stream, because the agent is
+    # the path that writes FILES. A refused request must not reach the point
+    # of rendering a downloadable, citation-bearing document that lends the
+    # content the authority of the plant's own record system.
+    verdict = safety.screen_request(prompt)
+    if not verdict.allowed:
+        audit.record_event(
+            user_action="agent:refused", session_id=session_id,
+            tool_name="agent", result_status="refused:" + verdict.category,
+        )
+        yield {
+            "type": "status", "stage": "policy",
+            "detail": "Refused: " + verdict.reason,
+        }
+        yield {
+            "type": "agent_done",
+            "task": "REFUSED",
+            "format": "",
+            "message": verdict.message,
+            "artifacts": [],
+            "calculation": None,
+            "evidence_count": 0,
+            "entity_count": 0,
+            "failures": [verdict.reason],
+            "refused": verdict.category,
+            "budget": budget.as_dict(),
+            "verified": True,
+        }
+        return
+
     # A follow-up like "now put that in a spreadsheet" names its subject only
     # in the previous turn, so the task is classified against the thread, not
     # the sentence alone.
@@ -920,6 +1128,16 @@ async def run_agent(
         user_action="agent:intake", session_id=session_id,
         tool_name="agent", result_status=task,
     )
+
+    # A package run takes minutes and produces several files. Saying what it
+    # intends to do, before it starts doing it, is the difference between a
+    # long wait and an apparent hang.
+    if task == TASK_PROJECT:
+        yield {
+            "type": "phases",
+            "task": task,
+            "phases": project_phases(prompt_in_context, tag),
+        }
 
     plan = build_plan(prompt, task, fmt, query=prompt_in_context)
     yield {
@@ -982,6 +1200,8 @@ async def run_agent(
             args = _tracker_doc_args(prompt, entities)
         elif defer == "grounded_doc":
             args = _grounded_doc_args(prompt, tag, evidence)
+        elif defer == "project_report":
+            args = _project_report_args(prompt, tag, evidence, entities, artifacts)
         elif defer == "calc":
             args = _calc_request(prompt, evidence)
         elif defer == "calc_note":
@@ -1100,7 +1320,17 @@ def _deliver_message(
             if task == TASK_TRACKER and entity_count
             else f"{evidence_count} retrieved sources"
         )
-        if task == TASK_GENERAL_DOC:
+        if task == TASK_PROJECT:
+            lines.append(
+                f"The package is built: {names}. It covers {entity_count} "
+                f"tagged item{'s' if entity_count != 1 else ''} inventoried "
+                f"from {evidence_count} retrieved source"
+                f"{'s' if evidence_count != 1 else ''}, with {cited} "
+                f"citation{'s' if cited != 1 else ''} recorded across the "
+                "provenance sidecars. The register is the spreadsheet; the "
+                "report reads it and cites the same sources."
+            )
+        elif task == TASK_GENERAL_DOC:
             lines.append(
                 f"I built {names} as {article} {fmt.upper()}. This project holds no "
                 "evidence for the subject, so the content came from the local "

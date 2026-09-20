@@ -26,7 +26,7 @@ export default function ActivityTrace({
   return (
     <ol
       className={cn(
-        "mb-2 space-y-0.5 border-l border-ink-700 pl-3 text-[11px]",
+        "mb-2 space-y-0.5 border-l border-ink-800 pl-3 text-[11px]",
         className,
       )}
     >

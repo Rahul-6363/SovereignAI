@@ -23,7 +23,7 @@ export default function Inspector({
     return (
       <aside
         title="Inspector — click an entity, a memory node or an evidence chip"
-        className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-l border-ink-700 bg-ink-950 py-3"
+        className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-l border-ink-800 bg-ink-950 py-3"
       >
         <span className="text-sm text-zinc-600">⌕</span>
         <span
@@ -37,8 +37,8 @@ export default function Inspector({
   }
 
   return (
-    <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-ink-700 bg-ink-950">
-      <div className="flex items-center justify-between border-b border-ink-700 px-3 py-2">
+    <aside className="flex h-full w-[340px] shrink-0 flex-col border-l border-ink-800 bg-ink-950">
+      <div className="flex items-center justify-between border-b border-ink-800 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
           Inspector
         </span>
@@ -74,7 +74,7 @@ function EntityInspector({ detail }: { detail: EntityDetail }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-ink-700 px-3 py-2">
+      <div className="border-b border-ink-800 px-3 py-2">
         <div className="flex items-center gap-2">
           <Badge color={e.confidence >= 0.8 ? "green" : "amber"}>
             {e.entity_type}
@@ -88,7 +88,7 @@ function EntityInspector({ detail }: { detail: EntityDetail }) {
         )}
       </div>
 
-      <div className="flex gap-1 border-b border-ink-700 px-3 py-1.5">
+      <div className="flex gap-1 border-b border-ink-800 px-3 py-1.5">
         {(["details", "preview"] as const).map((t) => (
           <button
             key={t}

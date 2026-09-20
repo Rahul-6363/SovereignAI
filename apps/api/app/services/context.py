@@ -120,7 +120,14 @@ def budget_for(
     win = window or model_window(model)
     reserve = min(max(int(num_predict) + 64, 192), max(win // 2, 256))
     available = max(win - reserve, 256)
-    system = min(int(available * 0.18), 400)
+    # The system share was 18% capped at 400 tokens, which the mode prompts
+    # outgrew the moment they had to state the evidence/knowledge boundary
+    # precisely enough for a 1B model to hold it. Truncation here is the
+    # worst kind available: `assemble` cuts from the END, so the last rules
+    # stop applying while the prompt still looks complete. Rules are the
+    # highest-value tokens in the whole prompt — an evidence row costs less
+    # to lose than the sentence that says evidence may not be invented.
+    system = min(int(available * 0.22), 520)
     rest = available - system
     history = int(rest * 0.30)
     evidence = rest - history
@@ -407,12 +414,30 @@ def assemble(
     history: list[dict] | None = None,
     evidence_header: str = "Evidence retrieved from this plant's memory:",
     window: Optional[int] = None,
+    include_evidence: bool = True,
+    preamble: str = "",
 ) -> tuple[list[dict], dict, ContextReport]:
     """Build the message list and the Ollama options for one turn.
 
     Returns `(messages, options, report)`. `options` always carries an
     explicit `num_ctx`, because the whole point of budgeting a prompt is void
     if the server then applies a different window to it.
+
+    `include_evidence=False` omits the evidence section entirely rather than
+    rendering an empty one. This is not cosmetic: a general or coding
+    question assembled with the section present reads as
+
+        Evidence retrieved from this plant's memory:
+        (no evidence was retrieved for this question)
+        Question: write a retry decorator
+
+    which tells a 1B model both that the question is about plant memory and
+    that the plant has nothing on it — reliably producing "I don't have
+    enough information" for a question that never needed any. The freed
+    budget goes to history, which is what actually helps those modes.
+
+    `preamble` is prepended to the user turn, for content that belongs with
+    the question rather than with the evidence (think mode's own notes).
     """
     budget = budget_for(model, num_predict, window)
     report = ContextReport(
@@ -427,20 +452,24 @@ def assemble(
         system_text = system_text[:system_cap].rstrip()
         report.dropped.append("system prompt truncated to fit the window")
 
-    evidence_text = render_evidence(
-        answer_context, question, budget.evidence, report
-    )
+    history_budget = budget.history
+    if include_evidence:
+        evidence_text = render_evidence(
+            answer_context, question, budget.evidence, report
+        )
+        body = f"{evidence_header}\n{evidence_text}\n\nQuestion: {question}"
+    else:
+        # No evidence section at all, and its share of the window goes to
+        # history instead — in these modes the thread IS the context.
+        history_budget = budget.history + budget.evidence
+        body = question
+
+    if preamble:
+        body = f"{preamble.strip()}\n\n{body}"
 
     messages: list[dict] = [{"role": "system", "content": system_text}]
-    messages.extend(fit_history(history, budget.history, report))
-    messages.append(
-        {
-            "role": "user",
-            "content": (
-                f"{evidence_header}\n{evidence_text}\n\nQuestion: {question}"
-            ),
-        }
-    )
+    messages.extend(fit_history(history, history_budget, report))
+    messages.append({"role": "user", "content": body})
 
     # Last line of defence. Everything above respects its own share, but the
     # shares are estimates -- if the total still overruns, history goes first

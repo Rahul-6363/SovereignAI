@@ -1,10 +1,10 @@
 "use client";
 /** Deliverables — generated artefacts (XLSX / DOCX / PDF) with citations.
  *
- * README §0.1 requires a "generated deliverables" area. The agent renderer is
- * Phase 1 (§7), so this pane states the boundary honestly rather than showing
- * inert mock files; anything the agent *does* emit this session appears here
- * with its download link and citation count.
+ * README §0.1 requires a "generated deliverables" area. The renderers now
+ * produce all three formats for real, so this pane lists what the project
+ * has actually emitted — read from disk, not from what this browser session
+ * happened to witness — each with its download link and citation count.
  */
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -106,7 +106,7 @@ function DeliverableRow({
       </div>
 
       {open && (
-        <div className="border-t border-ink-700 px-3 py-2">
+        <div className="border-t border-ink-800 px-3 py-2">
           {loading && (
             <div className="flex items-center gap-2 text-[11px] text-zinc-500">
               <Spinner className="h-3 w-3" /> Loading provenance…
@@ -174,7 +174,7 @@ export default function DeliverablesPane({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-ink-700 px-6 py-3">
+      <div className="flex items-center gap-2 border-b border-ink-800 px-6 py-3">
         <span className="text-sm font-medium text-zinc-200">Deliverables</span>
         <Badge color={all.length > 0 ? "green" : "amber"}>
           {all.length > 0 ? `${all.length} produced` : "none yet"}
@@ -217,7 +217,7 @@ export default function DeliverablesPane({
         )}
       </div>
 
-      <div className="border-t border-ink-700 px-6 py-3 text-[11px] leading-relaxed text-zinc-500">
+      <div className="border-t border-ink-800 px-6 py-3 text-[11px] leading-relaxed text-zinc-500">
         <span className="font-semibold text-zinc-400">How these are made:</span>{" "}
         a bounded agent loop (max {"3"} replans, {"12"} tool calls, {"180"}s)
         calls typed tools only. Numbers come from the deterministic calculation

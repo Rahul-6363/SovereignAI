@@ -73,17 +73,17 @@ export default function TrustDrawer({
       aria-label="Trust Center"
     >
       <div
-        className="flex h-full w-[420px] flex-col border-l border-ink-700 bg-ink-900 shadow-2xl"
+        className="flex h-full w-[420px] flex-col border-l border-ink-800 bg-ink-900 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-ink-700 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-ink-800 px-4 py-3">
           <h2 className="text-sm font-semibold text-zinc-100">Trust Center</h2>
           <Button variant="ghost" onClick={onClose} className="px-2">
             ✕
           </Button>
         </div>
 
-        <div className="flex gap-1 border-b border-ink-700 px-4 py-2">
+        <div className="flex gap-1 border-b border-ink-800 px-4 py-2">
           {(["runtime", "audit"] as const).map((t) => (
             <button
               key={t}
@@ -114,7 +114,7 @@ export default function TrustDrawer({
           {tab === "audit" && <AuditTab audit={audit} />}
         </div>
 
-        <div className="border-t border-ink-700 px-4 py-3 text-[10px] leading-relaxed text-zinc-600">
+        <div className="border-t border-ink-800 px-4 py-3 text-[10px] leading-relaxed text-zinc-600">
           This workbench runs entirely on your machine. No prompt, document or
           extracted entity ever leaves the device.
         </div>

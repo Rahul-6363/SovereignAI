@@ -289,7 +289,7 @@ export default function MemoryPane({
       </div>
 
       {/* preview pane */}
-      <div className="flex w-[380px] shrink-0 flex-col border-l border-ink-700">
+      <div className="flex w-[380px] shrink-0 flex-col border-l border-ink-800">
         {preview ? (
           <PidViewer
             imageUrl={preview.imageUrl}
@@ -304,7 +304,7 @@ export default function MemoryPane({
           />
         )}
         {selectedNode && (
-          <div className="border-t border-ink-700 p-3 text-xs">
+          <div className="border-t border-ink-800 p-3 text-xs">
             <div className="mb-1 flex items-center gap-2">
               <span className="font-mono text-sm text-zinc-100">
                 {selectedNode.tag}

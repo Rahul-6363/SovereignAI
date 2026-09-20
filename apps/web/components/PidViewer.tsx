@@ -28,7 +28,7 @@ export default function PidViewer({
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
-      <div className="flex items-center gap-2 border-b border-ink-700 px-3 py-1.5">
+      <div className="flex items-center gap-2 border-b border-ink-800 px-3 py-1.5">
         <span className="text-xs font-medium text-zinc-400">P&ID view</span>
         <div className="ml-auto flex items-center gap-2">
           {label && valid && (

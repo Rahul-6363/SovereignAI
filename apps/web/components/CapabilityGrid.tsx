@@ -39,7 +39,7 @@ export const CAPABILITIES: Capability[] = [
     name: "Deliverable studio",
     blurb:
       "Ask in plain language and get a real XLSX, DOCX or PDF with citations — not a chat reply to copy out by hand.",
-    status: "phase1",
+    status: "available",
     icon: "▤",
   },
   {
