@@ -16,10 +16,13 @@ import ProductStatus from "./ProductStatus";
 import EgressCounter from "./EgressCounter";
 import TrustDrawer from "./TrustDrawer";
 
+// A mix on purpose: two questions and two file requests, so the one composer
+// visibly does both. The file ones name their format, because that is how the
+// format gets chosen — there is no picker.
 const TASK_STARTERS = [
-  "Draft a change note for replacing valve CV-104",
+  "Draft a PDF change note for replacing valve CV-104",
   "What protects line L-2201, and what is its design pressure?",
-  "Build a tracker of every instrument on sheet 3",
+  "Generate an excel tracker of every instrument on sheet 3",
   "Does the relief valve setting comply with DOC-4412?",
 ];
 

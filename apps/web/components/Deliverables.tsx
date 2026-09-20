@@ -1,5 +1,5 @@
 "use client";
-/** Deliverables — generated artefacts (DOCX / XLSX / code) with citations.
+/** Deliverables — generated artefacts (XLSX / DOCX / PDF) with citations.
  *
  * README §0.1 requires a "generated deliverables" area. The agent renderer is
  * Phase 1 (§7), so this pane states the boundary honestly rather than showing
@@ -208,9 +208,10 @@ export default function DeliverablesPane({
           <EmptyState
             title="No deliverables yet"
             hint={
-              "Ask the agent for a document — “Draft an MOC note for valve XV-101” " +
-              "or “Build a tracker of all instruments”. Each artefact is rendered " +
-              "with citations and a machine-readable provenance sidecar."
+              "Just ask in the chat — “generate an excel of all instruments”, " +
+              "“draft a PDF change note for valve XV-101”. The format comes " +
+              "from your sentence; each artefact is rendered with citations " +
+              "and a machine-readable provenance sidecar."
             }
           />
         )}

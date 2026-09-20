@@ -24,7 +24,13 @@ from app.services.calc_engine import (
     calculate,
     list_operations,
 )
-from app.services.renderers import Citation, Section, render_docx, render_xlsx
+from app.services.renderers import (
+    Citation,
+    Section,
+    render_docx,
+    render_pdf,
+    render_xlsx,
+)
 
 
 @dataclass
@@ -197,6 +203,31 @@ async def _render_docx(
     )
     return ToolResult(
         ok=True, tool="render_docx",
+        output={"file": artifact.name, "citations": artifact.citations},
+        artifact=artifact.as_dict(),
+    )
+
+
+# ── render_pdf ────────────────────────────────────────────────
+# Same content contract as render_docx on purpose: the agent decides the
+# format from the request and swaps the tool, without reshaping the sections.
+async def _render_pdf(
+    ctx: ToolContext, title: str, sections: list[dict], subtitle: str = ""
+) -> ToolResult:
+    if not sections:
+        return ToolResult(False, "render_pdf", error="sections must not be empty")
+    artifact = render_pdf(
+        ctx.out_dir,
+        title=str(title or "Meshcore deliverable"),
+        sections=_as_sections(sections),
+        subtitle=subtitle,
+        metadata={"project_id": ctx.project_id},
+    )
+    audit.record_event(
+        user_action="tool:render_pdf", tool_name="render_pdf", result_status="ok",
+    )
+    return ToolResult(
+        ok=True, tool="render_pdf",
         output={"file": artifact.name, "citations": artifact.citations},
         artifact=artifact.as_dict(),
     )
@@ -514,6 +545,17 @@ REGISTRY: dict[str, Tool] = {
         },
         permission="write",
         run=_render_docx,
+    ),
+    "render_pdf": Tool(
+        name="render_pdf",
+        description="Render a cited PDF deliverable with a provenance sidecar.",
+        schema={
+            "title": "string",
+            "subtitle": "string (optional)",
+            "sections": "[{heading, body, bullets[], table{columns,rows}, citations[]}]",
+        },
+        permission="write",
+        run=_render_pdf,
     ),
     "render_xlsx": Tool(
         name="render_xlsx",

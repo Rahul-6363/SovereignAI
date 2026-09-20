@@ -38,7 +38,7 @@ export const CAPABILITIES: Capability[] = [
     id: "deliverables",
     name: "Deliverable studio",
     blurb:
-      "Emit a real DOCX / XLSX / code file with citations, not a chat reply.",
+      "Ask in plain language and get a real XLSX, DOCX or PDF with citations — not a chat reply to copy out by hand.",
     status: "phase1",
     icon: "▤",
   },

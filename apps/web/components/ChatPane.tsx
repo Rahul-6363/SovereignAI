@@ -6,6 +6,14 @@
  *  workspace. Supports handoff from the home composer (`initialPrompt`), a
  *  restored conversation (`initialConversationId`) and return from the P&ID
  *  capability (`fromPid`).
+ *
+ *  One composer, one button. Asking a question and asking for a file are two
+ *  different operations on the backend — one streams a grounded answer, the
+ *  other runs the bounded agent and renders an XLSX, DOCX or PDF — but which
+ *  one the user wants is already stated in their sentence, so the sentence
+ *  decides. There is no Build button and no format picker: "generate an excel
+ *  of all instruments" produces a spreadsheet, and the composer says so
+ *  before it is sent rather than after.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
@@ -13,6 +21,7 @@ import { streamSSE } from "@/lib/sse";
 import type {
   ActivityStep,
   ChatMessage,
+  ContextReport,
   DeliverableRec,
   EvidencePacket,
   EvidenceSource,
@@ -20,12 +29,13 @@ import type {
 import { AutoTextarea, Badge, Button, ConfidenceBar, CopyButton, Spinner, cn } from "./ui";
 import ActivityTrace from "./ActivityTrace";
 import { DeliverableCards } from "./Deliverables";
+import Markdown from "./Markdown";
 
 const STARTERS = [
   "Trace the process path to P-101.",
   "What instruments are connected to P-101?",
-  "Which valves are upstream of P-101?",
-  "What evidence supports the connection between L-101 and P-101?",
+  "Build an excel tracker of every instrument.",
+  "Draft a PDF change note for valve CV-104.",
   "Show uncertain extractions from this drawing.",
 ];
 
@@ -35,6 +45,8 @@ const STAGE_LABELS: Record<string, string> = {
   retrieving: "Searching plant memory…",
   grounding: "Checking P&ID evidence…",
   answering: "Writing the answer…",
+  intake: "Working out what to build…",
+  budget: "Stopping — budget spent",
 };
 
 /** status stage → activity-trace label (the visible tool/activity trace). */
@@ -50,23 +62,121 @@ let _id = 0;
 const nextId = () => `m${++_id}`;
 const stamp = () => new Date().toLocaleTimeString();
 
-/** Does this sentence ask for a FILE rather than an answer?
+/* ── routing: does this sentence ask for a FILE or for an answer? ──
  *
- *  Deliberately narrow: it needs an action verb *and* an artefact noun, so
- *  "what does the report say about P-101" stays a question while "generate a
- *  report on P-101" becomes a task. Mistaking a question for a build request
- *  is the more annoying error — it costs the user a slow agent run to get
- *  something they wanted read back to them — so the bar is set high.
+ * The bar used to be "an action verb AND an artefact noun", which missed the
+ * most common phrasing of all — naming the format and nothing else ("an
+ * excel of all instruments"). It is now three rules, in order:
+ *
+ *   1. A question form with no build verb is a question. "What does the
+ *      report say about P-101" must not run a 3-minute agent task to hand
+ *      back something the user wanted read out.
+ *   2. A build verb plus an artefact noun is a build. (The original rule.)
+ *   3. Naming a concrete file format is a build on its own — nobody types
+ *      "xlsx" conversationally.
+ *
+ * Mistaking a question for a build is still the more annoying error, which is
+ * why rule 1 comes first and wins.
  */
+const FORMAT_WORD =
+  /\b(excel|xlsx|spreadsheet|csv|workbook|docx|pdf|word document|word doc)\b/i;
 const ARTIFACT_VERB =
-  /\b(generate|create|make|produce|build|draft|write|export|prepare|compile|render|give me)\b/i;
+  /\b(generate|create|make|produce|build|draft|write|export|prepare|compile|render|give me|send me|i need|i want)\b/i;
 const ARTIFACT_NOUN =
-  /\b(excel|xlsx|spreadsheet|csv|sheet|docx|word|document|report|tracker|register|inventory|note|moc|deliverable|file|table|list)\b/i;
+  /\b(excel|xlsx|spreadsheet|csv|sheet|docx|word|document|pdf|report|tracker|register|inventory|note|moc|deliverable|file|table|list)\b/i;
+const QUESTION_FORM =
+  /^\s*(what|which|who|whom|whose|when|where|why|how|is|are|was|were|does|do|did|can|could|should|would|will|has|have|had|tell me)\b/i;
 
 export function wantsArtifact(text: string): boolean {
   const t = (text ?? "").trim();
   if (!t) return false;
-  return ARTIFACT_VERB.test(t) && ARTIFACT_NOUN.test(t);
+  const hasVerb = ARTIFACT_VERB.test(t);
+  if (QUESTION_FORM.test(t) && !hasVerb) return false;
+  if (hasVerb && ARTIFACT_NOUN.test(t)) return true;
+  return FORMAT_WORD.test(t);
+}
+
+/** Which file the sentence asks for — mirrors `agent.detect_format`.
+ *
+ *  Only used for the composer's own label. The backend decides for real; if
+ *  the two ever disagree the file is still correct, the hint is just wrong,
+ *  which is the right way round for a duplicated rule to fail.
+ */
+const TABULAR_SHAPE =
+  /\b(sheet|table|tabular|tracker|register|inventory|matrix|schedule|list of|all instruments|all valves|all equipment)\b/i;
+
+export function detectFormat(text: string): "XLSX" | "DOCX" | "PDF" {
+  const t = text ?? "";
+  if (/\b(excel|xlsx|spreadsheet|csv|workbook)\b/i.test(t)) return "XLSX";
+  if (/\bpdf\b/i.test(t)) return "PDF";
+  if (/\b(docx|word)\b/i.test(t)) return "DOCX";
+  if (TABULAR_SHAPE.test(t)) return "XLSX";
+  return "DOCX";
+}
+
+/** Advance the FIRST unfinished step matching `tool`.
+ *
+ *  Matching every step whose label starts with the tool name broke any plan
+ *  that used a tool twice — the MOC plan retrieves twice — because both rows
+ *  went active together and then both went done, so the trace claimed work
+ *  that had not happened yet.
+ */
+function advanceStep(
+  steps: ActivityStep[],
+  tool: string,
+  status: ActivityStep["status"],
+  detail?: string,
+): ActivityStep[] {
+  const i = steps.findIndex(
+    (s) => s.tool === tool && s.status !== "done" && s.status !== "failed",
+  );
+  if (i < 0) return steps;
+  const next = [...steps];
+  next[i] = {
+    ...next[i],
+    status,
+    detail: detail ?? next[i].detail,
+    at: stamp(),
+  };
+  return next;
+}
+
+/** Persisted sources → a packet, so a reopened thread keeps its citations.
+ *
+ *  Restoring the transcript without this left old turns with a "Why this
+ *  answer?" disclosure but no clickable evidence, so the same answer looked
+ *  differently grounded depending on whether you had reloaded the page.
+ */
+function packetFromSources(
+  sources: ChatMessage["sources"],
+  confidence?: number,
+): EvidencePacket | undefined {
+  if (!sources || sources.length === 0) return undefined;
+  return {
+    answer_context: sources.map((s) => {
+      if (s.source_type === "graph") {
+        // Graph sources are persisted as one "A RELATION B" string.
+        const [entity, relation, ...rest] = (s.relation ?? "").split(" ");
+        return {
+          source_type: "graph",
+          entity: entity || null,
+          relation: relation || null,
+          target: rest.join(" ") || null,
+          text: s.relation ?? null,
+        } as EvidenceSource;
+      }
+      return {
+        source_type: s.source_type,
+        document: s.document || null,
+        page: s.page || null,
+        bbox: s.bbox ?? null,
+        text: null,
+      } as EvidenceSource;
+    }),
+    confidence: confidence ?? 0,
+    query_intent: "",
+    retrieved_from: "restored from this conversation",
+  };
 }
 
 export default function ChatPane({
@@ -105,6 +215,10 @@ export default function ChatPane({
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const autoranRef = useRef(false);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Read inside the SSE callbacks, which close over the render that started
+  // the stream — the state value there is stale by the second event.
+  const conversationRef = useRef<number | null>(initialConversationId);
 
   // Only follow the stream while the user is already at the bottom; otherwise
   // scrolling up to re-read an earlier answer is fought by every new token.
@@ -118,9 +232,18 @@ export default function ChatPane({
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    pinnedRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }, []);
+
+  const setConversation = useCallback(
+    (id: number) => {
+      if (conversationRef.current === id) return;
+      conversationRef.current = id;
+      setConversationId(id);
+      onConversationChange?.(id);
+    },
+    [onConversationChange],
+  );
 
   // Restore a thread whenever the selected one changes — not only on mount.
   // Switching chats in the rail has to swap the transcript, and reopening a
@@ -128,6 +251,10 @@ export default function ChatPane({
   // only a transcript of text and every citation and download is lost.
   useEffect(() => {
     setConversationId(initialConversationId);
+    conversationRef.current = initialConversationId;
+    // A newly opened thread must start at its bottom even if the user had
+    // scrolled up in the thread they were reading before.
+    pinnedRef.current = true;
 
     if (!initialConversationId) {
       setMessages([]);       // "New chat" starts genuinely empty
@@ -152,6 +279,7 @@ export default function ChatPane({
               sources: m.sources ?? [],
               claims: m.claims ?? [],
               deliverables: m.artifacts ?? [],
+              evidence: packetFromSources(m.sources, m.confidence ?? 0),
               done: true,
             })),
         );
@@ -166,14 +294,12 @@ export default function ChatPane({
     };
   }, [initialConversationId]);
 
-  const submit = async (question: string) => {
-    const q = question.trim();
-    if (!q || streaming) return;
-    setInput("");
+  /** Open a turn pair and return the assistant id plus its patcher. */
+  const openTurn = (question: string, stage: string) => {
     const userMsg: ChatMessage = {
       id: nextId(),
       role: "user",
-      content: q,
+      content: question,
       done: true,
     };
     const assistant: ChatMessage = {
@@ -181,8 +307,9 @@ export default function ChatPane({
       role: "assistant",
       content: "",
       streaming: true,
-      stage: "Preparing session…",
+      stage,
       activity: [],
+      prompt: question,
       done: false,
     };
     pinnedRef.current = true;
@@ -190,18 +317,53 @@ export default function ChatPane({
     setStreaming(true);
     const controller = new AbortController();
     abortRef.current = controller;
-
     const patch = (fn: (m: ChatMessage) => ChatMessage) =>
-      setMessages((ms) =>
-        ms.map((m) => (m.id === assistant.id ? fn(m) : m)),
-      );
+      setMessages((ms) => ms.map((m) => (m.id === assistant.id ? fn(m) : m)));
+    return { patch, controller };
+  };
+
+  /** Shared teardown: an aborted stream is a stop, not an error. */
+  const closeTurn = (
+    patch: (fn: (m: ChatMessage) => ChatMessage) => void,
+    error?: unknown,
+  ) => {
+    const aborted = error instanceof DOMException && error.name === "AbortError";
+    patch((m) => ({
+      ...m,
+      streaming: false,
+      stage: undefined,
+      stopped: aborted ? true : m.stopped,
+      error: error && !aborted
+        ? error instanceof Error
+          ? error.message
+          : String(error)
+        : m.error,
+      activity: (m.activity ?? []).map((s) =>
+        s.status === "active" || s.status === "pending"
+          ? { ...s, status: aborted ? ("failed" as const) : ("done" as const) }
+          : s,
+      ),
+      done: true,
+    }));
+    setStreaming(false);
+    abortRef.current = null;
+  };
+
+  // ── grounded answer: streams tokens from the chat endpoint ──────────
+  const submit = async (question: string) => {
+    const q = question.trim();
+    if (!q || streaming) return;
+    setInput("");
+    const { patch, controller } = openTurn(q, STAGE_LABELS.session);
 
     try {
       await streamSSE(
         `/api/projects/${projectId}/chat`,
-        { message: q, conversation_id: conversationId ?? undefined },
+        { message: q, conversation_id: conversationRef.current ?? undefined },
         (ev) => {
           const d = ev.data;
+          if (d.conversation_id) setConversation(Number(d.conversation_id));
+
           if (ev.event === "status") {
             const stage = String(d.stage ?? "");
             patch((m) => {
@@ -220,9 +382,10 @@ export default function ChatPane({
                       {
                         id: `s${closed.length + 1}`,
                         label,
-                        detail: stage === "session" && d.conversation_id
-                          ? `conversation ${d.conversation_id}`
-                          : undefined,
+                        detail:
+                          stage === "session" && d.conversation_id
+                            ? `conversation ${d.conversation_id}`
+                            : undefined,
                         status: "active" as const,
                         at: stamp(),
                       },
@@ -230,35 +393,53 @@ export default function ChatPane({
                   : closed,
               };
             });
-            if (d.conversation_id) {
-              setConversationId(Number(d.conversation_id));
-              onConversationChange?.(Number(d.conversation_id));
-            }
           } else if (ev.event === "evidence") {
             const packet = d.packet as EvidencePacket;
             patch((m) => ({
               ...m,
               evidence: packet,
+              activity: (m.activity ?? []).map((s) =>
+                s.status === "active" && s.label.startsWith("Retrieve")
+                  ? {
+                      ...s,
+                      status: "done" as const,
+                      detail: `${packet.answer_context?.length ?? 0} sources`,
+                    }
+                  : s,
+              ),
+            }));
+          } else if (ev.event === "context") {
+            // What the model was actually shown, before it says anything.
+            const report = d.report as ContextReport;
+            patch((m) => ({
+              ...m,
+              context: report,
               activity: [
-                ...(m.activity ?? []).map((s) =>
-                  s.status === "active" && s.label.startsWith("Retrieve")
-                    ? { ...s, status: "done" as const, detail: `${packet.answer_context?.length ?? 0} sources` }
-                    : s,
-                ),
+                ...(m.activity ?? []),
+                {
+                  id: `c${(m.activity ?? []).length + 1}`,
+                  tool: "context",
+                  label: "Fit prompt to context window",
+                  detail:
+                    `${report.prompt_tokens}/${report.window} tokens · ` +
+                    `${report.evidence_kept}/${report.evidence_total} sources`,
+                  status: "done" as const,
+                  at: stamp(),
+                },
               ],
             }));
           } else if (ev.event === "tool") {
-            // Forward-compatible: the agent loop (Phase 1) emits typed tool
-            // calls; they appear in the same activity trace when connected.
             patch((m) => ({
               ...m,
               activity: [
                 ...(m.activity ?? []),
                 {
                   id: `t${(m.activity ?? []).length + 1}`,
+                  tool: String(d.tool ?? "unknown"),
                   label: `Tool: ${String(d.tool ?? "unknown")}`,
                   detail: d.detail ? String(d.detail) : undefined,
-                  status: String(d.status ?? "done") === "failed" ? "failed" : "done",
+                  status:
+                    String(d.status ?? "done") === "failed" ? "failed" : "done",
                   at: stamp(),
                 },
               ],
@@ -277,6 +458,7 @@ export default function ChatPane({
               deliverables: artifacts,
               intent: String(d.intent ?? ""),
               model: String(d.model ?? ""),
+              context: (d.context as ContextReport) ?? m.context,
               streaming: false,
               stage: undefined,
               activity: (m.activity ?? []).map((s) =>
@@ -284,34 +466,21 @@ export default function ChatPane({
               ),
               done: true,
             }));
-          } else if (ev.event === "done_meta") {
-            if (d.conversation_id) {
-              setConversationId(Number(d.conversation_id));
-              onConversationChange?.(Number(d.conversation_id));
-            }
           } else if (ev.event === "error") {
             patch((m) => ({
               ...m,
               error: String(d.message ?? "Unknown error"),
               streaming: false,
+              stage: undefined,
               done: true,
             }));
           }
         },
         controller.signal,
       );
-      patch((m) => ({ ...m, streaming: false, done: true }));
+      closeTurn(patch);
     } catch (e) {
-      const aborted = e instanceof DOMException && e.name === "AbortError";
-      patch((m) => ({
-        ...m,
-        error: aborted ? "" : e instanceof Error ? e.message : String(e),
-        streaming: false,
-        done: true,
-      }));
-    } finally {
-      setStreaming(false);
-      abortRef.current = null;
+      closeTurn(patch, e);
     }
   };
 
@@ -320,44 +489,36 @@ export default function ChatPane({
     const q = question.trim();
     if (!q || streaming) return;
     setInput("");
-    const userMsg: ChatMessage = {
-      id: nextId(), role: "user", content: q, done: true,
-    };
-    const assistant: ChatMessage = {
-      id: nextId(), role: "assistant", content: "",
-      streaming: true, stage: "Planning the task…", activity: [], done: false,
-    };
-    pinnedRef.current = true;
-    setMessages((m) => [...m, userMsg, assistant]);
-    setStreaming(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    const patch = (fn: (m: ChatMessage) => ChatMessage) =>
-      setMessages((ms) => ms.map((m) => (m.id === assistant.id ? fn(m) : m)));
+    const { patch, controller } = openTurn(q, "Working out what to build…");
 
     try {
       await streamSSE(
         `/api/projects/${projectId}/agent`,
-        { prompt: q, conversation_id: conversationId ?? undefined },
+        { prompt: q, conversation_id: conversationRef.current ?? undefined },
         (ev) => {
           const d = ev.data;
           // An agent turn belongs to the same thread as the chat turns around
           // it, so the id it resolves has to reach both this pane and the rail.
-          if (d.conversation_id) {
-            const cid = Number(d.conversation_id);
-            if (cid !== conversationId) {
-              setConversationId(cid);
-              onConversationChange?.(cid);
-            }
-          }
-          if (ev.event === "plan") {
-            const steps = (d.steps as { tool: string; why: string }[]) ?? [];
+          if (d.conversation_id) setConversation(Number(d.conversation_id));
+
+          if (ev.event === "status") {
+            const stage = String(d.stage ?? "");
             patch((m) => ({
               ...m,
-              stage: `Plan: ${steps.map((s) => s.tool).join(" -> ")}`,
+              stage:
+                String(d.detail ?? "") || STAGE_LABELS[stage] || m.stage,
+            }));
+          } else if (ev.event === "plan") {
+            const steps = (d.steps as { tool: string; why: string }[]) ?? [];
+            const fmt = d.format ? String(d.format).toUpperCase() : "";
+            patch((m) => ({
+              ...m,
+              stage: fmt
+                ? `Planned ${steps.length} steps → ${fmt}`
+                : `Planned ${steps.length} steps`,
               activity: steps.map((s, i) => ({
                 id: `p${i}`,
+                tool: s.tool,
                 label: `${s.tool} — ${s.why}`,
                 status: "pending" as const,
                 at: stamp(),
@@ -367,33 +528,31 @@ export default function ChatPane({
             if (String(d.decision) === "deny") {
               patch((m) => ({
                 ...m,
-                activity: (m.activity ?? []).map((s) =>
-                  s.label.startsWith(String(d.tool))
-                    ? { ...s, status: "failed" as const, detail: String(d.reason) }
-                    : s,
+                activity: advanceStep(
+                  m.activity ?? [],
+                  String(d.tool),
+                  "failed",
+                  String(d.reason),
                 ),
               }));
             }
           } else if (ev.event === "tool") {
             const tool = String(d.tool);
             const status = String(d.status);
+            const mapped: ActivityStep["status"] =
+              status === "done"
+                ? "done"
+                : status === "failed"
+                  ? "failed"
+                  : "active";
             patch((m) => ({
               ...m,
               stage: status === "running" ? `Running ${tool}…` : m.stage,
-              activity: (m.activity ?? []).map((s) =>
-                s.label.startsWith(tool) && s.status !== "done"
-                  ? {
-                      ...s,
-                      status:
-                        status === "done"
-                          ? ("done" as const)
-                          : status === "failed"
-                            ? ("failed" as const)
-                            : ("active" as const),
-                      detail: d.detail ? String(d.detail) : s.detail,
-                      at: stamp(),
-                    }
-                  : s,
+              activity: advanceStep(
+                m.activity ?? [],
+                tool,
+                mapped,
+                d.detail ? String(d.detail) : undefined,
               ),
             }));
           } else if (ev.event === "verify") {
@@ -410,45 +569,11 @@ export default function ChatPane({
           } else if (ev.event === "agent_done") {
             const artifacts = (d.artifacts as DeliverableRec[]) ?? [];
             if (artifacts.length > 0) onDeliverables?.(artifacts);
-            const budget = d.budget as Record<string, number> | undefined;
-            const calc = d.calculation as Record<string, unknown> | undefined;
-            const failures = (d.failures as string[]) ?? [];
-
-            const lines: string[] = [];
-            if (artifacts.length) {
-              lines.push(
-                `Produced **${artifacts.length}** deliverable${
-                  artifacts.length > 1 ? "s" : ""
-                } from ${d.evidence_count ?? 0} retrieved sources.`,
-              );
-            } else if (failures.length) {
-              lines.push("The task did not produce an artefact.");
-            } else {
-              lines.push(
-                `Retrieved ${d.evidence_count ?? 0} sources for this question.`,
-              );
-            }
-            if (calc) {
-              lines.push(
-                `\n\n**Calculation ${calc.calculation_id}:** ${calc.result} ` +
-                  `${calc.unit} — \`${calc.formula}\`\nStatus: ${calc.status}. ` +
-                  "The number came from the deterministic engine, not from a " +
-                  "language model.",
-              );
-            }
-            if (failures.length) {
-              lines.push(`\n\n_Blocked:_ ${failures.join("; ")}`);
-            }
-            if (budget) {
-              lines.push(
-                `\n\n_Budget: ${budget.tool_calls}/${budget.max_tool_calls} tool ` +
-                  `calls, ${budget.replans}/${budget.max_replans} replans, ` +
-                  `${budget.elapsed_s}s of ${budget.wall_clock_seconds}s._`,
-              );
-            }
+            // The reply text comes from the run that produced it, so the live
+            // turn and the same turn after a reload read identically.
             patch((m) => ({
               ...m,
-              content: lines.join(""),
+              content: String(d.message ?? m.content),
               deliverables: artifacts,
               streaming: false,
               stage: undefined,
@@ -461,39 +586,33 @@ export default function ChatPane({
             }));
           } else if (ev.event === "error") {
             patch((m) => ({
-              ...m, error: String(d.message ?? "Unknown error"),
-              streaming: false, done: true,
+              ...m,
+              error: String(d.message ?? "Unknown error"),
+              streaming: false,
+              stage: undefined,
+              done: true,
             }));
           }
         },
         controller.signal,
       );
-      patch((m) => ({ ...m, streaming: false, done: true }));
+      closeTurn(patch);
     } catch (e) {
-      const aborted = e instanceof DOMException && e.name === "AbortError";
-      patch((m) => ({
-        ...m,
-        error: aborted ? "" : e instanceof Error ? e.message : String(e),
-        streaming: false,
-        done: true,
-      }));
-    } finally {
-      setStreaming(false);
-      abortRef.current = null;
+      closeTurn(patch, e);
     }
   };
 
-  // ── one input, two paths ─────────────────────────────────────────────
-  // Asking a question and asking for a file are different operations here:
-  // one streams a grounded answer, the other runs the bounded agent and
-  // produces a DOCX or XLSX. Making the user choose the right button first
-  // is the kind of thing that should be inferred, so it is — from whether
-  // the sentence asks for an artefact. The explicit Build button stays for
-  // when the guess is wrong.
-  const send = (question: string) => {
-    if (wantsArtifact(question)) return runAgentTask(question);
-    return submit(question);
-  };
+  // ── one input, one button ────────────────────────────────────────────
+  const send = useCallback(
+    (question: string) => {
+      if (wantsArtifact(question)) return runAgentTask(question);
+      return submit(question);
+    },
+    // Both paths read their inputs from refs and arguments, so the identity
+    // of `send` does not need to change between renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, streaming],
+  );
 
   // ── handoff from the home composer: run the prompt once ──────────────
   useEffect(() => {
@@ -525,6 +644,7 @@ export default function ChatPane({
         activity: [
           {
             id: "a1",
+            tool: "upload",
             label: `Upload ${file.name}`,
             status: "active",
             at: stamp(),
@@ -532,11 +652,10 @@ export default function ChatPane({
         ],
         done: false,
       };
+      pinnedRef.current = true;
       setMessages((m) => [...m, userMsg, assistant]);
       const patch = (fn: (m: ChatMessage) => ChatMessage) =>
-        setMessages((ms) =>
-          ms.map((m) => (m.id === assistant.id ? fn(m) : m)),
-        );
+        setMessages((ms) => ms.map((m) => (m.id === assistant.id ? fn(m) : m)));
       try {
         const doc = await api.attachDocument(projectId, file);
         patch((m) => ({
@@ -550,6 +669,7 @@ export default function ChatPane({
             ),
             {
               id: "a2",
+              tool: "ingest",
               label: "Queue ingestion (render → extract → graph → index)",
               status: "done" as const,
               at: stamp(),
@@ -578,6 +698,19 @@ export default function ChatPane({
     [projectId],
   );
 
+  // ── retry: re-run the prompt that produced the last turn ─────────────
+  // Only the newest assistant turn offers it. Re-running an old turn would
+  // append its answer at the bottom, out of order with the question it
+  // answers, which reads as a different conversation than it is.
+  const lastAssistant = [...messages]
+    .reverse()
+    .find((m) => m.role === "assistant" && m.done);
+  const retry = useCallback(() => {
+    const prompt = lastAssistant?.prompt;
+    if (!prompt || streaming) return;
+    void send(prompt);
+  }, [lastAssistant?.prompt, streaming, send]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {fromPid && (
@@ -598,18 +731,22 @@ export default function ChatPane({
         scrollRef={scrollRef}
         onScroll={onScroll}
         projectId={projectId}
+        retryableId={
+          !streaming && lastAssistant?.prompt ? lastAssistant.id : null
+        }
+        onRetry={retry}
       />
       <Composer
         input={input}
         setInput={setInput}
         send={send}
-        runAgentTask={runAgentTask}
         streaming={streaming}
         stop={() => abortRef.current?.abort()}
         starters={messages.length === 0 ? STARTERS : []}
         attaching={attaching}
         attachError={attachError}
         onAttachClick={() => fileRef.current?.click()}
+        textareaRef={composerRef}
       />
       <input
         ref={fileRef}
@@ -625,18 +762,23 @@ export default function ChatPane({
     </div>
   );
 }
+
 function MessageList({
   messages,
   onEvidence,
   scrollRef,
   onScroll,
   projectId,
+  retryableId,
+  onRetry,
 }: {
   messages: ChatMessage[];
   onEvidence: (src: EvidenceSource) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onScroll?: () => void;
   projectId: number;
+  retryableId: string | null;
+  onRetry: () => void;
 }) {
   return (
     <div
@@ -648,7 +790,7 @@ function MessageList({
         m.role === "user" ? (
           <div key={m.id} className="mb-4 flex justify-end animate-fade-in">
             <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-ink-700 px-4 py-2.5 text-sm text-zinc-100">
-              {m.content}
+              <span className="whitespace-pre-wrap">{m.content}</span>
               {m.attachments && m.attachments.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {m.attachments.map((a) => (
@@ -672,7 +814,20 @@ function MessageList({
               </div>
             )}
             <ActivityTrace steps={m.activity ?? []} />
-            {m.content && <AnswerBody text={m.content} />}
+            {m.content && <Markdown text={m.content} />}
+            {/* A caret while the model is mid-sentence, so a slow local model
+                is visibly working rather than apparently finished. */}
+            {m.streaming && (
+              <span
+                aria-hidden
+                className="ml-0.5 inline-block h-4 w-[2px] translate-y-[3px] animate-pulse-dot bg-accent"
+              />
+            )}
+            {m.stopped && (
+              <p className="mt-2 text-[11px] italic text-zinc-500">
+                Stopped. The answer above is incomplete.
+              </p>
+            )}
             {m.deliverables && m.deliverables.length > 0 && (
               <DeliverableCards
                 items={m.deliverables}
@@ -695,7 +850,21 @@ function MessageList({
                 <div className="w-40">
                   <ConfidenceBar value={m.confidence} />
                 </div>
-                {m.content && <CopyButton text={m.content} className="ml-auto" />}
+              </div>
+            )}
+            {m.done && (m.content || m.error) && (
+              <div className="mt-2 flex items-center gap-1">
+                {m.content && <CopyButton text={m.content} />}
+                {m.id === retryableId && (
+                  <button
+                    onClick={onRetry}
+                    title="Run this question again"
+                    className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-500 transition-colors hover:bg-ink-800 hover:text-zinc-300"
+                  >
+                    ↻ Retry
+                  </button>
+                )}
+                {m.context && <ContextBadge report={m.context} />}
               </div>
             )}
             {m.done && <WhyThisAnswer message={m} />}
@@ -708,10 +877,11 @@ function MessageList({
             <div className="mb-1 text-lg font-medium text-zinc-300">
               Ask about this plant
             </div>
-            <p className="text-sm text-zinc-500">
+            <p className="max-w-md text-sm text-zinc-500">
               Answers are grounded in extracted plant memory with visible
-              evidence — and the tool/activity trace shows how each answer was
-              produced, or the system says so.
+              evidence, and the activity trace shows how each one was produced.
+              Ask for a spreadsheet, a document or a PDF and it gets built and
+              filed under Deliverables.
             </p>
           </div>
         </div>
@@ -720,41 +890,71 @@ function MessageList({
   );
 }
 
-/** Markdown-lite renderer: `code`, **bold**, _em_, newlines. */
-function AnswerBody({ text }: { text: string }) {
-  const blocks = text.split(/\n\n+/);
+/** What the model was shown, on demand.
+ *
+ *  A 1B model that answers badly because a source was cut for space looks
+ *  identical to one that answered badly on its own. This is the difference,
+ *  stated rather than left to be inferred.
+ */
+function ContextBadge({ report }: { report: ContextReport }) {
+  const [open, setOpen] = useState(false);
+  const pct = report.window
+    ? Math.round((report.prompt_tokens / report.window) * 100)
+    : 0;
   return (
-    <div className="answer-body space-y-3 text-sm leading-relaxed text-zinc-200">
-      {blocks.map((b, i) => (
-        <p key={i} className="whitespace-pre-wrap">
-          {renderInline(b)}
-        </p>
-      ))}
-    </div>
+    <span className="relative ml-auto">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="What this model was actually shown"
+        className="rounded-md px-1.5 py-0.5 font-mono text-[10px] text-zinc-600 transition-colors hover:bg-ink-800 hover:text-zinc-400"
+      >
+        ctx {pct}% · {report.evidence_kept}/{report.evidence_total} src
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 z-10 mb-1 w-72 rounded-lg border border-ink-700 bg-ink-850 p-2.5 text-left shadow-lg">
+          <div className="mb-1 text-[11px] font-semibold text-zinc-300">
+            Context window
+          </div>
+          <dl className="space-y-0.5 text-[11px] text-zinc-500">
+            <div className="flex justify-between gap-2">
+              <dt>prompt</dt>
+              <dd className="font-mono text-zinc-400">
+                {report.prompt_tokens} / {report.window} tokens
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>reserved for answer</dt>
+              <dd className="font-mono text-zinc-400">
+                {report.reserve_for_answer}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>evidence rows</dt>
+              <dd className="font-mono text-zinc-400">
+                {report.evidence_kept} of {report.evidence_total}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>history turns</dt>
+              <dd className="font-mono text-zinc-400">
+                {report.history_turns_kept} kept ·{" "}
+                {report.history_turns_digested} digested
+              </dd>
+            </div>
+          </dl>
+          {report.dropped.length > 0 && (
+            <ul className="mt-1.5 space-y-0.5 border-t border-ink-700 pt-1.5 text-[11px] text-amber-400/80">
+              {report.dropped.map((d, i) => (
+                <li key={i}>· {d}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </span>
   );
 }
 
-function renderInline(text: string): React.ReactNode[] {
-  const out: React.ReactNode[] = [];
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|_[^_]+_)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let k = 0;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    const tok = m[0];
-    if (tok.startsWith("`")) {
-      out.push(<code key={k++}>{tok.slice(1, -1)}</code>);
-    } else if (tok.startsWith("**")) {
-      out.push(<strong key={k++}>{tok.slice(2, -2)}</strong>);
-    } else {
-      out.push(<em key={k++}>{tok.slice(1, -1)}</em>);
-    }
-    last = m.index + tok.length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
-}
 /** Clickable evidence chips for one turn, collapsed to 8 by default. */
 function EvidenceChips({
   packet,
@@ -903,32 +1103,41 @@ function WhyThisAnswer({ message }: { message: ChatMessage }) {
     </div>
   );
 }
+
 function Composer({
   input,
   setInput,
   send,
-  runAgentTask,
   streaming,
   stop,
   starters,
   attaching,
   attachError,
   onAttachClick,
+  textareaRef,
 }: {
   input: string;
   setInput: (v: string) => void;
   /** Routes to an answer or a build, whichever the sentence asks for. */
   send: (q: string) => void;
-  runAgentTask: (q: string) => void;
   streaming: boolean;
   stop: () => void;
   starters: string[];
   attaching: boolean;
   attachError: string;
   onAttachClick: () => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   // Shown live, so the routing decision is never a surprise after the fact.
   const willBuild = wantsArtifact(input);
+  const format = willBuild ? detectFormat(input) : null;
+  const empty = input.trim() === "";
+
+  // Focus returns to the composer the moment a turn ends, so a follow-up is
+  // typed rather than clicked-then-typed.
+  useEffect(() => {
+    if (!streaming) textareaRef.current?.focus();
+  }, [streaming, textareaRef]);
 
   return (
     <div className="border-t border-ink-700 bg-ink-950/80 px-6 py-4">
@@ -938,7 +1147,8 @@ function Composer({
             <button
               key={s}
               onClick={() => send(s)}
-              className="rounded-full border border-ink-600 px-3 py-1 text-xs text-zinc-400 transition-colors hover:border-accent hover:text-zinc-200"
+              disabled={streaming}
+              className="rounded-full border border-ink-600 px-3 py-1 text-xs text-zinc-400 transition-colors hover:border-accent hover:text-zinc-200 disabled:opacity-40"
             >
               {s}
             </button>
@@ -949,13 +1159,13 @@ function Composer({
         className="flex items-end gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          send(input);
+          if (!streaming) send(input);
         }}
       >
         <button
           type="button"
           onClick={onAttachClick}
-          disabled={attaching}
+          disabled={attaching || streaming}
           title="Attach a PDF or drawing to this project"
           className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-xl border border-ink-600 text-zinc-400 transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
         >
@@ -964,35 +1174,45 @@ function Composer({
         <AutoTextarea
           value={input}
           onChange={setInput}
+          textareaRef={textareaRef}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              send(input);
+              if (!streaming) send(input);
             }
           }}
           maxRows={8}
-          placeholder="Ask anything, or ask for a document or spreadsheet…"
-          className="min-h-[42px] flex-1 rounded-xl border border-ink-600 bg-ink-850 px-3.5 py-2.5 text-sm leading-6 text-zinc-200 placeholder-zinc-600 focus:border-accent focus:outline-none"
+          placeholder={
+            streaming
+              ? "Working… press Stop to interrupt"
+              : "Ask anything, or ask for an excel, a document or a PDF…"
+          }
+          className={cn(
+            "min-h-[42px] flex-1 rounded-xl border bg-ink-850 px-3.5 py-2.5 text-sm leading-6 text-zinc-200 placeholder-zinc-600 focus:outline-none",
+            streaming
+              ? "border-ink-700 opacity-60"
+              : willBuild
+                ? "border-accent/60 focus:border-accent"
+                : "border-ink-600 focus:border-accent",
+          )}
         />
         {streaming ? (
           <Button variant="outline" onClick={stop} title="Stop generating">
             ■ Stop
           </Button>
         ) : (
-          <>
-            {!willBuild && input.trim() !== "" && (
-              <Button
-                variant="outline"
-                onClick={() => runAgentTask(input)}
-                title="Force the agent path — produces a DOCX or XLSX"
-              >
-                ⚙ Build
-              </Button>
-            )}
-            <Button variant="primary" type="submit" disabled={!input.trim()}>
-              {willBuild ? "⚙ Create" : "↑ Send"}
-            </Button>
-          </>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={empty}
+            title={
+              willBuild
+                ? `Build a ${format} and file it under Deliverables`
+                : "Send"
+            }
+          >
+            {willBuild ? `⚙ Create ${format}` : "↑ Send"}
+          </Button>
         )}
       </form>
       {attachError && (
@@ -1001,14 +1221,15 @@ function Composer({
       <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">
         {willBuild ? (
           <span className="text-accent">
-            This looks like a file request — it will run the agent and produce
-            a document you can download right here.
+            Reading this as a file request — it will run the agent and produce a{" "}
+            {format} you can download here and in Deliverables. Say “as a PDF”
+            or “as a spreadsheet” to change the format.
           </span>
         ) : (
           <>
             Answers are grounded in this project&apos;s drawings and documents.
-            Ask for a spreadsheet or a report and one gets built. 📎 attaches a
-            drawing · 100% local
+            Ask for a spreadsheet, a document or a PDF and one gets built. 📎
+            attaches a drawing · 100% local
           </>
         )}
       </p>

@@ -6,7 +6,7 @@
  *  · chat         — Claude-like agent conversation (activity trace, attachments)
  *  · pid          — the EXISTING P&ID upload/processing/review interface
  *  · memory       — Plant Memory entity graph
- *  · deliverables — generated DOCX/XLSX artefacts
+ *  · deliverables — generated XLSX/DOCX/PDF artefacts
  *
  * The `pid` view intentionally reuses the existing Explorer pane and the
  * existing upload/ingest sidebar rather than rebuilding the P&ID workflow.
@@ -143,6 +143,17 @@ export default function Workspace({
       .projectConversations(projectId)
       .then((cs) => setConversationCount(cs.length))
       .catch(() => setConversationCount(0));
+  }, [projectId, localVersion]);
+
+  // Artefacts live on disk, so what the project has produced is a fact about
+  // the project rather than about this browser session. Without this the
+  // Overview reported "0 deliverables" for a project full of them, and the
+  // count only became right after the agent happened to run again.
+  useEffect(() => {
+    api
+      .deliverables(projectId)
+      .then(setDeliverables)
+      .catch(() => setDeliverables([]));
   }, [projectId, localVersion]);
 
   const openEntityDetail = useCallback(

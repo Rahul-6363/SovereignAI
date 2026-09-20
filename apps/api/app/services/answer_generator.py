@@ -1,6 +1,10 @@
 """Answer generator — grounded, streaming chat completion.
 
-Produces SSE event dicts: status / evidence / token / done.
+Produces SSE event dicts: status / evidence / context / token / done.
+
+The `context` event reports the token budget the prompt was assembled
+against (see `services/context.py`) so the UI can state what the model was
+actually shown rather than implying it read everything retrieved.
 
 When the configured chat model is unavailable (air-gap demo before pull),
 a deterministic template answer is built directly from the evidence packet
@@ -9,31 +13,21 @@ so the demo still streams a credible, provable answer.
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 
 from sqlmodel import Session, select
 
 from app.config import Settings
-from app.services import audit
+from app.services import audit, context as ctx
 from app.services.confidence import answer_confidence
 from app.services.evidence_builder import build_evidence_packet, attach_document_meta
 from app.services.graph_memory import GraphMemory
 from app.services.hybrid_retriever import HybridRetriever
 from app.services.ollama_gateway import OllamaGateway
 from app.services.query_router import classify, choose_model
-from packages.prompts import GROUNDED_ANSWER_PROMPT, prompt_version
+from packages.prompts import GROUNDED_SYSTEM_PROMPT, prompt_version
 
 UNKNOWN = "unknown"
-
-
-# Fields the model can actually reason with. Everything else in the packet —
-# bboxes, row ids, document ids — exists so the UI can resolve a citation to a
-# place on a drawing. Sending it to the model costs prompt tokens on every
-# turn and buys nothing, which on CPU is seconds per question.
-_MODEL_FIELDS = (
-    "source_type", "entity", "relation", "target", "text", "document", "page",
-)
 
 
 def _tags_present(packet: dict, tags: list[str]) -> bool:
@@ -54,22 +48,6 @@ def _tags_present(packet: dict, tags: list[str]) -> bool:
         for field in ("entity", "target", "text")
     ).upper()
     return any(tag.upper() in haystack for tag in tags)
-
-
-def _packet_for_model(packet: dict) -> dict:
-    """The evidence packet trimmed to what the model needs to read.
-
-    The full packet still goes to the UI in the `evidence` event, so citations
-    keep their coordinates; this affects only what is put in the prompt.
-    """
-    return {
-        "query_intent": packet.get("query_intent", ""),
-        "retrieved_from": packet.get("retrieved_from", ""),
-        "answer_context": [
-            {k: item[k] for k in _MODEL_FIELDS if item.get(k) not in (None, "")}
-            for item in (packet.get("answer_context") or [])[:12]
-        ],
-    }
 
 
 class AnswerGenerator:
@@ -190,6 +168,7 @@ class AnswerGenerator:
             "sources": sources,
             "intent": intent,
             "model": llm_used,
+            "context": holder.get("context"),
             "prompt_version": prompt_version("grounded_answer"),
         }
 
@@ -203,37 +182,26 @@ class AnswerGenerator:
         result: dict,
         history: list[dict] | None = None,
     ):
-        rendered = json.dumps(
-            _packet_for_model(packet), ensure_ascii=False, separators=(",", ":")
+        # The prompt is assembled against this model's own context window
+        # rather than assumed to fit. `options` carries an explicit num_ctx,
+        # so what the budget reserved is what the server actually allocates —
+        # otherwise Ollama's default window silently drops the front of the
+        # prompt, which is where the rules and the evidence are.
+        messages, options, report = ctx.assemble(
+            model=model,
+            num_predict=self.settings.ollama_num_predict,
+            system=GROUNDED_SYSTEM_PROMPT,
+            question=question,
+            answer_context=packet.get("answer_context") or [],
+            history=history,
         )
-        prompt = GROUNDED_ANSWER_PROMPT.format(evidence_packet=rendered, question=question)
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You ground every statement in the supplied evidence packet. "
-                    "Answer in at most 3 short sentences. Mention ONLY tags that "
-                    "appear in the evidence packet — never invent or substitute "
-                    "tags. A 'Verified from Plant Memory' section with the exact "
-                    "facts is appended automatically; do not repeat lists."
-                ),
-            },
-        ]
-        # Prior turns give the model the referents a follow-up depends on;
-        # the evidence packet still decides what it is allowed to assert.
-        for turn in (history or [])[-6:]:
-            messages.append({"role": turn["role"], "content": turn["content"][:1500]})
-        messages.append({"role": "user", "content": prompt})
+        result["context"] = report.as_dict()
+        # Emitted before the first token so the trace can state what the
+        # model was given at the moment it was given it.
+        yield {"type": "context", "report": report.as_dict()}
         parts: list[str] = []
         try:
-            async for token in self.gateway.chat_stream(
-                messages,
-                model,
-                {
-                    "temperature": 0.2,
-                    "num_predict": self.settings.ollama_num_predict,
-                },
-            ):
+            async for token in self.gateway.chat_stream(messages, model, options):
                 parts.append(token)
                 yield {"type": "token", "text": token}
         except Exception as exc:

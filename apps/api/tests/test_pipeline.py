@@ -581,3 +581,123 @@ def test_draft_is_compute_and_cannot_produce_engineering_numbers():
     assert REGISTRY["draft"].permission == "compute"
     assert REGISTRY["calculate"].permission == "compute"
     assert "UNVERIFIED" in REGISTRY["draft"].description
+
+
+# ── format is inferred from the request, not chosen in the UI ──
+def test_requested_format_picks_the_renderer():
+    """There is no format picker any more: the user already said "excel" or
+    "pdf" in the sentence. Getting this wrong hands back the wrong file
+    type, which is more annoying than being asked."""
+    from app.services.agent import (
+        FORMAT_DOCX,
+        FORMAT_PDF,
+        FORMAT_XLSX,
+        build_plan,
+        classify_task,
+        detect_format,
+    )
+
+    assert detect_format("generate an excel of all instruments") == FORMAT_XLSX
+    assert detect_format("make me a pdf report on P-101") == FORMAT_PDF
+    assert detect_format("draft a word document about CV-104") == FORMAT_DOCX
+    # No format named: shape decides. A tracker is tabular, a note is prose.
+    assert detect_format("build a tracker of every valve") == FORMAT_XLSX
+    assert detect_format("draft an MOC note for CV-104") == FORMAT_DOCX
+
+    for prompt, renderer in (
+        ("give me a pdf of every valve", "render_pdf"),
+        ("generate an excel file of all instruments", "render_xlsx"),
+        ("write a word report on P-101", "render_docx"),
+    ):
+        task = classify_task(prompt)
+        plan = build_plan(prompt, task, detect_format(prompt))
+        assert plan[-1].tool == renderer, f"{prompt} -> {plan[-1].tool}"
+
+
+def test_plant_file_request_always_plans_a_render():
+    """A request for a file that named a plant subject used to fall through to
+    the bare-retrieve plan: the user asked for a document and got a retrieval
+    with nothing to download."""
+    from app.services.agent import TASK_GROUNDED_DOC, build_plan, classify_task
+
+    for prompt in (
+        "make me a pdf report on P-101",
+        "write a report on P-101",
+        "produce a document covering the relief valves",
+    ):
+        task = classify_task(prompt)
+        plan = build_plan(prompt, task)
+        assert plan[-1].tool.startswith("render_"), f"{prompt} -> {task}"
+
+    assert classify_task("write a report on P-101") == TASK_GROUNDED_DOC
+    # Plurals: `\binstrument\b` never matched "instruments", so every real
+    # plant request took the ungrounded model-knowledge path.
+    assert classify_task("generate an excel of all instruments") != "GENERAL_DOCUMENT"
+
+
+def test_pdf_render_produces_a_cited_file():
+    from pathlib import Path
+    import tempfile
+
+    from app.services.renderers import Citation, Section, render_pdf
+
+    with tempfile.TemporaryDirectory() as tmp:
+        artifact = render_pdf(
+            Path(tmp),
+            title="Relief valve review",
+            sections=[
+                Section(
+                    heading="1. Scope",
+                    body="Paragraph one.\n\nParagraph two.",
+                    bullets=["first", "second"],
+                    table={"columns": ["Tag", "Type"],
+                           "rows": [["PSV-101", "relief valve"]]},
+                    citations=[Citation(label="PSV-101", document="s.pdf", page=2)],
+                )
+            ],
+            subtitle="from plant memory",
+        )
+        assert artifact.kind == "pdf"
+        assert artifact.path.exists() and artifact.path.stat().st_size > 0
+        assert artifact.citations == 1
+        assert artifact.provenance_path.exists()
+
+        import pymupdf
+
+        with pymupdf.open(artifact.path) as doc:
+            text = "".join(page.get_text() for page in doc)
+        assert "Relief valve review" in text
+        assert "PSV-101" in text
+        assert "REQUIRES ENGINEERING REVIEW" in text
+
+
+def test_agent_reply_is_written_server_side():
+    """The prose used to be assembled in the browser, so the turn saved to the
+    database had an empty body — a reopened thread showed a file with no
+    explanation and read as if the request had gone unanswered."""
+    from app.services.agent import AgentBudget, TASK_TRACKER, _deliver_message
+
+    message = _deliver_message(
+        task=TASK_TRACKER,
+        fmt="xlsx",
+        artifacts=[{"name": "tracker.xlsx", "citations": 12}],
+        calc=None,
+        evidence_count=0,
+        entity_count=31,
+        failures=[],
+        budget=AgentBudget(),
+    )
+    assert "tracker.xlsx" in message
+    assert "XLSX" in message
+    assert "31 extracted entities" in message
+    assert "12 citations" in message
+    assert "DRAFT" in message
+
+    blocked = _deliver_message(
+        task=TASK_TRACKER, fmt="xlsx", artifacts=[], calc=None,
+        evidence_count=0, entity_count=0,
+        failures=["render_xlsx: columns must not be empty"],
+        budget=AgentBudget(),
+    )
+    assert "could not produce" in blocked
+    assert "columns must not be empty" in blocked

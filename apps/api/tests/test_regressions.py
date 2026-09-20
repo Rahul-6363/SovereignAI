@@ -209,20 +209,134 @@ def test_model_prompt_drops_ui_only_fields():
     """bboxes and row ids exist so the UI can place a citation. Sending them
     to the model costs prompt tokens on every turn and buys nothing, which on
     CPU is seconds per question."""
-    from app.services.answer_generator import _packet_for_model
+    from app.services.context import render_evidence
 
-    slim = _packet_for_model({
-        "query_intent": "PLANT_MEMORY",
-        "retrieved_from": "graph",
-        "answer_context": [{
+    rendered = render_evidence(
+        [{
             "source_type": "pid", "entity": "P-101", "text": "Centrifugal Pump",
             "document": "a.png", "page": 1,
             "bbox": [0.1, 0.2, 0.3, 0.4], "document_id": 11, "entity_id": 41,
             "confidence": 0.97,
         }],
-    })
-    item = slim["answer_context"][0]
-    assert item["entity"] == "P-101"
-    assert item["document"] == "a.png"
-    for dropped in ("bbox", "document_id", "entity_id", "confidence"):
-        assert dropped not in item, f"{dropped} should not reach the model"
+        "what is P-101?",
+        budget_tokens=400,
+    )
+    assert "P-101" in rendered
+    assert "Centrifugal Pump" in rendered
+    assert "a.png" in rendered and "p1" in rendered
+    # The UI-only values must not appear anywhere in the prompt text.
+    for dropped in ("0.2", "0.3", "document_id", "entity_id", "0.97"):
+        assert dropped not in rendered, f"{dropped} should not reach the model"
+
+
+def test_prompt_is_budgeted_and_num_ctx_is_explicit():
+    """Left to itself Ollama picks a context window and silently truncates the
+    front of anything longer — which is where the rules and the evidence are.
+    A budgeted prompt that does not pin num_ctx is not budgeted at all."""
+    from app.services.context import assemble, model_window
+
+    rows = [
+        {"source_type": "graph", "entity": f"P-{i:03d}",
+         "relation": "HAS_INSTRUMENT", "target": f"PI-{i:03d}",
+         "confidence": 0.9}
+        for i in range(400)
+    ]
+    history = [
+        {"role": "user", "content": "tell me about the unit " + "x" * 4000},
+        {"role": "assistant", "content": "y" * 6000},
+    ] * 10
+
+    messages, options, report = assemble(
+        model="gemma3:1b",
+        num_predict=320,
+        system="stay grounded",
+        question="what instruments are on P-001?",
+        answer_context=rows,
+        history=history,
+    )
+
+    window = model_window("gemma3:1b")
+    assert options["num_ctx"] == window
+    # Everything sent must fit inside the window with the answer's reserve
+    # still free, or the model reads a truncated prompt.
+    assert report.prompt_tokens <= window - report.reserve_for_answer
+    assert report.evidence_total == 400
+    assert 0 < report.evidence_kept < 400
+    assert report.history_turns_digested > 0
+    # The tag that was actually asked about survives the cut.
+    assert any("P-001" in m["content"] for m in messages)
+
+
+def test_thread_context_fills_gaps_but_does_not_overrule_the_request():
+    """Follow-ups need the thread ("now make that a PDF" names no subject),
+    but borrowing it unconditionally let the previous turn's words win: asked
+    for a PDF about P-101 right after an excel of all instruments, the agent
+    produced an instrument spreadsheet."""
+    from app.services.agent import (
+        FORMAT_DOCX,
+        FORMAT_PDF,
+        FORMAT_XLSX,
+        TASK_GROUNDED_DOC,
+        TASK_TRACKER,
+        _resolve_format,
+        _with_context,
+        classify_task,
+    )
+
+    history = [
+        {"role": "user", "content": "Generate excel file of all instruments"},
+        {"role": "assistant", "content": "I built a.xlsx"},
+    ]
+
+    def route(prompt):
+        in_context = _with_context(prompt, history)
+        task = classify_task(in_context)
+        return task, _resolve_format(prompt, in_context, task)
+
+    # Names its own subject and format: the thread must not touch either.
+    assert route("make me a pdf report on P-101") == (
+        TASK_GROUNDED_DOC,
+        FORMAT_PDF,
+    )
+    # Names only a format: subject comes from the thread, format from here.
+    assert route("now make that a PDF") == (TASK_TRACKER, FORMAT_PDF)
+    assert route("also as a word doc") == (TASK_TRACKER, FORMAT_DOCX)
+    # Names neither: the thread supplies both.
+    assert route("give me the same thing") == (TASK_TRACKER, FORMAT_XLSX)
+
+
+def test_thread_context_is_only_borrowed_by_an_actual_follow_up():
+    """Borrowing the thread whenever the sentence named no plant subject was
+    too eager: "make a spreadsheet of the top vision models", asked after an
+    instrument tracker, inherited "all instruments" and produced an instrument
+    tracker instead of what was asked for."""
+    from app.services.agent import (
+        TASK_GENERAL_DOC,
+        TASK_TRACKER,
+        _with_context,
+        classify_task,
+    )
+
+    history = [
+        {"role": "user", "content": "Generate excel file of all instruments"},
+        {"role": "assistant", "content": "built a.xlsx"},
+        {"role": "user", "content": "now make that a PDF"},
+        {"role": "assistant", "content": "built b.pdf"},
+    ]
+
+    # A back-reference, or a phrase too short to stand alone, is a follow-up.
+    for follow_up in ("now make that a PDF", "also as a word doc", "as a PDF"):
+        resolved = _with_context(follow_up, history)
+        assert resolved != follow_up, follow_up
+        # And it reaches past the middle turn, which names no subject either,
+        # so a two-hop chain does not lose the instruments.
+        assert "instruments" in resolved, follow_up
+        assert classify_task(resolved) == TASK_TRACKER
+
+    # A self-contained request about something else is not a follow-up.
+    for fresh in (
+        "make a spreadsheet of the top vision models",
+        "write a report on transformer architectures",
+    ):
+        assert _with_context(fresh, history) == fresh
+        assert classify_task(fresh) == TASK_GENERAL_DOC

@@ -249,6 +249,10 @@ export interface ActivityStep {
   detail?: string;
   status: "pending" | "active" | "done" | "failed";
   at: string; // local HH:MM:SS
+  /** The tool this step runs, matched against the stream's `tool` events.
+   *  Matching on the label instead meant a plan that used one tool twice
+   *  advanced both of its rows on the first call. */
+  tool?: string;
 }
 
 /** A generated artefact (DOCX / XLSX / code). Rendered as a download card. */
@@ -331,6 +335,24 @@ export interface Capability {
   icon: string;
 }
 
+/** What the model was actually shown for one turn (`services/context.py`).
+ *
+ * A small local model silently drops the front of an over-long prompt, so
+ * "the model did not see that source" has to be observable rather than
+ * inferred from a wrong answer.
+ */
+export interface ContextReport {
+  model: string;
+  window: number;
+  prompt_tokens: number;
+  reserve_for_answer: number;
+  history_turns_kept: number;
+  history_turns_digested: number;
+  evidence_kept: number;
+  evidence_total: number;
+  dropped: string[];
+}
+
 /** ── client-side chat model ──────────────────────────────── */
 export interface ChatMessage {
   id: string;
@@ -347,6 +369,12 @@ export interface ChatMessage {
   attachments?: { name: string; kind: string }[];
   model?: string;
   intent?: string;
+  /** Token budget this turn's prompt was assembled against. */
+  context?: ContextReport;
   error?: string;
+  /** The user pressed Stop; whatever had streamed is kept and labelled. */
+  stopped?: boolean;
+  /** The prompt that produced this turn, so it can be retried verbatim. */
+  prompt?: string;
   done: boolean;
 }

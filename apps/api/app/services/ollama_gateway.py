@@ -43,6 +43,19 @@ class OllamaLatency:
         self.history = self.history[-100:]
 
 
+def _round_up_ctx(tokens: int) -> int:
+    """Next power-of-two-ish window that holds `tokens`.
+
+    Ollama allocates the KV cache from num_ctx, so asking for an odd exact
+    number costs memory for nothing; the usual sizes are what the runtimes
+    are tuned for.
+    """
+    for size in (2048, 4096, 8192, 16384, 32768):
+        if tokens <= size:
+            return size
+    return 32768
+
+
 class OllamaGateway:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -149,24 +162,39 @@ class OllamaGateway:
         system: str = "",
         temperature: float = 0.2,
         num_predict: int | None = None,
+        num_ctx: int | None = None,
     ) -> str:
         """One non-streaming completion.
 
         `num_predict` overrides the global answer cap. Chat answers are kept
         short on purpose, but structured output is different: a JSON table cut
         off at the default cap is not a short table, it is unparseable.
+
+        `num_ctx` is passed through when the caller has budgeted the prompt.
+        Left unset, Ollama picks its own window and truncates anything longer
+        than it without saying so; every caller here that builds a prompt of
+        non-trivial size sets it, and the default keeps enough room for the
+        requested output rather than silently competing with it.
         """
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+
+        from app.services.context import estimate_messages, model_window
+
+        predict = num_predict or self.settings.ollama_num_predict
+        if num_ctx is None:
+            needed = estimate_messages(messages) + int(predict) + 128
+            num_ctx = max(model_window(model), _round_up_ctx(needed))
         chunks = []
         async for token in self.chat_stream(
             messages,
             model,
             {
                 "temperature": temperature,
-                "num_predict": num_predict or self.settings.ollama_num_predict,
+                "num_predict": predict,
+                "num_ctx": int(num_ctx),
             },
         ):
             chunks.append(token)
