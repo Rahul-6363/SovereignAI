@@ -1,0 +1,350 @@
+{
+  "document": "unit-a-pid-vector.pdf",
+  "entities": [
+    {
+      "type": "equipment",
+      "tag": "V-101",
+      "label": "Feed Vessel",
+      "bbox": [
+        0.1125,
+        0.45,
+        0.075,
+        0.14
+      ],
+      "confidence": 0.98,
+      "raw_text": "V-101"
+    },
+    {
+      "type": "equipment",
+      "tag": "P-101",
+      "label": "Centrifugal Pump",
+      "bbox": [
+        0.3275,
+        0.5675,
+        0.065,
+        0.065
+      ],
+      "confidence": 0.97,
+      "raw_text": "P-101"
+    },
+    {
+      "type": "equipment",
+      "tag": "E-101",
+      "label": "Shell & Tube Heater",
+      "bbox": [
+        0.56,
+        0.4325,
+        0.12,
+        0.055
+      ],
+      "confidence": 0.96,
+      "raw_text": "E-101"
+    },
+    {
+      "type": "equipment",
+      "tag": "T-201",
+      "label": "Product Tank",
+      "bbox": [
+        0.8225,
+        0.4225,
+        0.075,
+        0.075
+      ],
+      "confidence": 0.97,
+      "raw_text": "T-201"
+    },
+    {
+      "type": "instrument",
+      "tag": "LIC-101",
+      "label": "Level Controller",
+      "bbox": [
+        0.05,
+        0.175,
+        0.05,
+        0.05
+      ],
+      "confidence": 0.94,
+      "raw_text": "LIC-101"
+    },
+    {
+      "type": "instrument",
+      "tag": "PI-101",
+      "label": "Pressure Indicator",
+      "bbox": [
+        0.1875,
+        0.2775,
+        0.045,
+        0.045
+      ],
+      "confidence": 0.92,
+      "raw_text": "PI-101"
+    },
+    {
+      "type": "instrument",
+      "tag": "PI-102",
+      "label": "Discharge Pressure",
+      "bbox": [
+        0.4175,
+        0.7375,
+        0.045,
+        0.045
+      ],
+      "confidence": 0.93,
+      "raw_text": "PI-102"
+    },
+    {
+      "type": "instrument",
+      "tag": "FI-101",
+      "label": "Flow Indicator",
+      "bbox": [
+        0.445,
+        0.175,
+        0.05,
+        0.05
+      ],
+      "confidence": 0.9,
+      "raw_text": "FI-101"
+    },
+    {
+      "type": "instrument",
+      "tag": "TI-101",
+      "label": "Inlet Temperature",
+      "bbox": [
+        0.5075,
+        0.1175,
+        0.045,
+        0.045
+      ],
+      "confidence": 0.88,
+      "raw_text": "TI-101"
+    },
+    {
+      "type": "instrument",
+      "tag": "TI-102",
+      "label": "Outlet Temperature",
+      "bbox": [
+        0.6675,
+        0.1175,
+        0.045,
+        0.045
+      ],
+      "confidence": 0.89,
+      "raw_text": "TI-102"
+    },
+    {
+      "type": "instrument",
+      "tag": "TT-201",
+      "label": "Skin Temperature",
+      "bbox": [
+        0.2775,
+        0.1975,
+        0.045,
+        0.045
+      ],
+      "confidence": 0.45,
+      "raw_text": "TT-201"
+    },
+    {
+      "type": "valve",
+      "tag": "PSV-101",
+      "label": "Pressure Safety Valve",
+      "bbox": [
+        0.385,
+        0.355,
+        0.05,
+        0.05
+      ],
+      "confidence": 0.91,
+      "raw_text": "PSV-101"
+    },
+    {
+      "type": "valve",
+      "tag": "XV-101",
+      "label": "Motor Isolating Valve",
+      "bbox": [
+        0.235,
+        0.57,
+        0.03,
+        0.03
+      ],
+      "confidence": 0.93,
+      "raw_text": "XV-101"
+    },
+    {
+      "type": "valve",
+      "tag": "FV-101",
+      "label": "Flow Control Valve",
+      "bbox": [
+        0.475,
+        0.53,
+        0.03,
+        0.03
+      ],
+      "confidence": 0.92,
+      "raw_text": "FV-101"
+    },
+    {
+      "type": "process_line",
+      "tag": "L-101",
+      "label": "Suction Line",
+      "bbox": [
+        0.1875,
+        0.52,
+        0.14,
+        0.08
+      ],
+      "confidence": 0.96,
+      "raw_text": "L-101"
+    },
+    {
+      "type": "process_line",
+      "tag": "L-102",
+      "label": "Discharge Line",
+      "bbox": [
+        0.3925,
+        0.46,
+        0.1675,
+        0.14
+      ],
+      "confidence": 0.95,
+      "raw_text": "L-102"
+    },
+    {
+      "type": "process_line",
+      "tag": "L-103",
+      "label": "Heater Outlet",
+      "bbox": [
+        0.68,
+        0.4525,
+        0.1425,
+        0.015
+      ],
+      "confidence": 0.94,
+      "raw_text": "L-103"
+    },
+    {
+      "type": "process_line",
+      "tag": "L-104",
+      "label": "Bypass (uncertain)",
+      "bbox": [
+        0.48,
+        0.3925,
+        0.16,
+        0.015
+      ],
+      "confidence": 0.42,
+      "raw_text": "L-104"
+    },
+    {
+      "type": "process_line",
+      "tag": "L-105",
+      "label": "Drain (uncertain)",
+      "bbox": [
+        0.265,
+        0.6,
+        0.075,
+        0.08
+      ],
+      "confidence": 0.4,
+      "raw_text": "L-105"
+    }
+  ],
+  "relationships": [
+    {
+      "source": "V-101",
+      "relation": "TO",
+      "target": "L-101",
+      "confidence": 0.95
+    },
+    {
+      "source": "L-101",
+      "relation": "TO",
+      "target": "P-101",
+      "confidence": 0.96
+    },
+    {
+      "source": "P-101",
+      "relation": "TO",
+      "target": "L-102",
+      "confidence": 0.96
+    },
+    {
+      "source": "L-102",
+      "relation": "TO",
+      "target": "E-101",
+      "confidence": 0.95
+    },
+    {
+      "source": "E-101",
+      "relation": "TO",
+      "target": "L-103",
+      "confidence": 0.94
+    },
+    {
+      "source": "L-103",
+      "relation": "TO",
+      "target": "T-201",
+      "confidence": 0.95
+    },
+    {
+      "source": "L-104",
+      "relation": "TO",
+      "target": "E-101",
+      "confidence": 0.4
+    },
+    {
+      "source": "V-101",
+      "relation": "HAS_INSTRUMENT",
+      "target": "LIC-101",
+      "confidence": 0.94
+    },
+    {
+      "source": "V-101",
+      "relation": "HAS_INSTRUMENT",
+      "target": "PI-101",
+      "confidence": 0.92
+    },
+    {
+      "source": "P-101",
+      "relation": "HAS_INSTRUMENT",
+      "target": "PI-102",
+      "confidence": 0.93
+    },
+    {
+      "source": "E-101",
+      "relation": "HAS_INSTRUMENT",
+      "target": "TI-101",
+      "confidence": 0.88
+    },
+    {
+      "source": "E-101",
+      "relation": "HAS_INSTRUMENT",
+      "target": "TI-102",
+      "confidence": 0.89
+    },
+    {
+      "source": "E-101",
+      "relation": "HAS_INSTRUMENT",
+      "target": "TT-201",
+      "confidence": 0.45
+    },
+    {
+      "source": "P-101",
+      "relation": "HAS_VALVE",
+      "target": "PSV-101",
+      "confidence": 0.91
+    },
+    {
+      "source": "L-101",
+      "relation": "HAS_VALVE",
+      "target": "XV-101",
+      "confidence": 0.93
+    },
+    {
+      "source": "L-102",
+      "relation": "HAS_VALVE",
+      "target": "FV-101",
+      "confidence": 0.92
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+version: "3.9"
+
+# Meshcore — local compose stack.
+# The MVP intentionally keeps inference on the host (Ollama) so that
+# the demo can run with zero network egress. This compose file is an
+# optional convenience for hosting the API + web app together.
+services:
+  api:
+    image: meshcore-api:local
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  web:
+    image: meshcore-web:local
+    build:
+      context: ./apps/web
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api

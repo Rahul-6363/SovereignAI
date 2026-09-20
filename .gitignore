@@ -1,0 +1,55 @@
+# Env — per-machine config. .env.example IS committed; copy it to .env.
+.env
+.env.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+npm-debug.log*
+
+# App data (runtime state)
+data/uploads/*
+data/pages/*
+data/extracted/*
+data/indexes/*
+data/deliverables/*
+data/eval-report.json
+data/plant_memory.db*
+!data/uploads/.gitkeep
+!data/pages/.gitkeep
+!data/extracted/.gitkeep
+!data/indexes/.gitkeep
+!data/deliverables/.gitkeep
+
+# Logs (keep the directory, not its contents)
+logs/*
+!logs/.gitkeep
+
+# Local scratch / one-off debug scripts with absolute paths
+check_encoding.py
+*.local.py
+patch_*.py
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store

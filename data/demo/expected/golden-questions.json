@@ -1,0 +1,58 @@
+{
+  "document": "unit-a-pid.png",
+  "questions": [
+    {
+      "question": "What is P-101?",
+      "expected_tags": [
+        "P-101"
+      ],
+      "forbidden_tags": [
+        "X-999"
+      ],
+      "kind": "entity_lookup"
+    },
+    {
+      "question": "What is upstream of P-101?",
+      "expected_tags": [
+        "L-101",
+        "V-101"
+      ],
+      "forbidden_tags": [
+        "T-201"
+      ],
+      "kind": "connectivity"
+    },
+    {
+      "question": "Which instruments are associated with P-101?",
+      "expected_tags": [
+        "PI-102",
+        "PSV-101"
+      ],
+      "forbidden_tags": [
+        "TI-999"
+      ],
+      "kind": "instrumentation"
+    },
+    {
+      "question": "Why do you believe L-101 connects to P-101?",
+      "expected_tags": [
+        "L-101",
+        "P-101"
+      ],
+      "forbidden_tags": [
+        "L-999"
+      ],
+      "kind": "evidence"
+    },
+    {
+      "question": "What connections are uncertain on this page?",
+      "expected_tags": [
+        "TT-201",
+        "L-104",
+        "L-105"
+      ],
+      "forbidden_tags": [],
+      "kind": "uncertainty"
+    }
+  ]
+}

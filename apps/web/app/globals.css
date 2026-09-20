@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-ink-900 text-zinc-200 antialiased;
+}
+
+/* Slim, calm scrollbars (Claude-style) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f3f transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #3f3f3f;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Markdown-ish answer blocks */
+.answer-body code {
+  @apply rounded bg-ink-700 px-1 py-0.5 font-mono text-[0.85em] text-amber-300;
+}
+.answer-body strong {
+  @apply font-semibold text-zinc-100;
+}

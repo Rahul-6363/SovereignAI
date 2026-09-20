@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plant-memory.local/schemas/extraction.schema.json",
+  "title": "P&ID Vision Extraction",
+  "description": "Strict contract returned by the vision extraction pipeline.",
+  "type": "object",
+  "required": ["entities", "relationships"],
+  "properties": {
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "tag", "label", "bbox", "confidence"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["equipment", "instrument", "valve", "process_line", "tag", "area", "plant"]
+          },
+          "tag": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "raw_text": { "type": "string" },
+          "bbox": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "relation", "target", "confidence"],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "HAS_TAG", "CONNECTED_TO", "FLOWS_TO", "FROM", "TO",
+              "HAS_INSTRUMENT", "HAS_VALVE", "MENTIONED_IN",
+              "SUPPORTED_BY", "HAS_FINDING", "HAS_SOP"
+            ]
+          },
+          "target": { "type": "string", "minLength": 1 },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+**/__pycache__
+**/*.pyc
+.venv
+venv
+.git
+.pytest_cache
+.mypy_cache
+.ruff_cache
+apps/web/node_modules
+apps/web/.next
+data/uploads/*
+data/pages/*
+data/extracted/*
+data/indexes/*
+data/plant_memory.db
+logs
+*.log
