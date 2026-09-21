@@ -332,7 +332,6 @@ export interface Capability {
   name: string;
   blurb: string;
   status: CapabilityStatus;
-  icon: string;
 }
 
 /** What the model was actually shown for one turn (`services/context.py`).
@@ -366,7 +365,6 @@ export interface ChatModeSpec {
   label: string;
   hint: string;
   placeholder: string;
-  icon: string;
 }
 
 /** ── client-side chat model ──────────────────────────────── */

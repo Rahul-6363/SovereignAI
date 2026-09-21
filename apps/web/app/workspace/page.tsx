@@ -2,6 +2,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import ProjectCard from "@/components/ProjectCard";
 import NewProjectForm from "@/components/NewProjectForm";
+import { IconChevronLeft } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
 
@@ -16,26 +17,26 @@ export default async function ProjectsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
+    <main className="mx-auto max-w-3xl px-6 py-14">
       <div className="mb-8">
         <Link
           href="/"
-          className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline"
+          className="inline-flex items-center gap-1.5 text-[12px] text-zinc-500 transition-colors hover:text-zinc-300"
         >
-          ← Meshcore
+          <IconChevronLeft size={13} /> Meshcore
         </Link>
-        <h1 className="mb-2 mt-3 text-2xl font-semibold text-zinc-100">
+        <h1 className="mb-2.5 mt-4 text-[28px] font-medium tracking-tight text-zinc-100">
           Projects
         </h1>
-        <p className="text-sm leading-relaxed text-zinc-400">
+        <p className="max-w-xl text-[14px] leading-relaxed text-zinc-500">
           A project is the shared session context between the Meshcore workspace
           and the P&amp;ID capability — drawings, extracted plant memory, chats
           and deliverables all live inside one.
         </p>
       </div>
 
-      <div className="mb-6 flex flex-col items-start gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
+      <div className="mb-6 flex flex-col items-start gap-2.5">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
           {projects.length > 0 ? "Your projects" : "Create your first project"}
         </h2>
         <NewProjectForm />
@@ -46,11 +47,11 @@ export default async function ProjectsPage() {
           <ProjectCard key={p.id} project={p} />
         ))}
         {projects.length === 0 && (
-          <li className="rounded-xl border border-ink-700 bg-ink-850 p-5 text-sm text-zinc-400">
-            <p className="mb-2">
-              No projects yet. Create one above or run the demo seed:
+          <li className="rounded-2xl border border-dashed border-ink-800 p-6 text-center">
+            <p className="mb-2.5 text-[13px] text-zinc-400">
+              No projects yet. Create one above, or seed the demo data:
             </p>
-            <code className="rounded bg-ink-700 px-2 py-1 font-mono text-xs text-amber-300">
+            <code className="rounded-lg border border-ink-800 bg-ink-950 px-2.5 py-1.5 font-mono text-[11px] text-accent-soft">
               python scripts/seed_demo.py
             </code>
           </li>
@@ -58,9 +59,9 @@ export default async function ProjectsPage() {
       </ul>
 
       {offline && (
-        <div className="mt-6 rounded-xl border border-rose-900/50 bg-rose-950/30 p-4 text-sm text-rose-300">
+        <div className="mt-6 rounded-2xl border border-rose-900/50 bg-rose-950/30 p-4 text-[13px] text-rose-300">
           API is unreachable. Start it with{" "}
-          <code className="rounded bg-ink-700 px-1.5 py-0.5 font-mono text-xs">
+          <code className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[11px]">
             python -m uvicorn app.main:app --reload
           </code>{" "}
           in <code className="font-mono text-xs">apps/api</code>.

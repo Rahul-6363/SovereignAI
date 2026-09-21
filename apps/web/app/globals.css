@@ -13,20 +13,48 @@ body {
 
 body {
   @apply bg-ink-900 text-zinc-200 antialiased;
+  /* Tabular figures everywhere by default would hurt prose, but proportional
+     ones make a column of counts in the sidebar visibly ragged. The `font-mono`
+     sites handle numbers; this just stops the UI feeling loose. */
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
-/* Slim, calm scrollbars (Claude-style) */
+::selection {
+  background: rgba(217, 119, 87, 0.28);
+}
+
+/* One focus treatment for the whole app.
+   Focus rings were previously per-component and half of them were missing, so
+   tabbing through the workspace lost the caret entirely. This gives every
+   focusable element the same visible ring without drawing one on mouse click. */
+:focus-visible {
+  outline: 2px solid rgba(217, 119, 87, 0.65);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Slim, calm scrollbars, tinted to the warm surface ramp rather than the
+   default blue-grey. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3f3f3f transparent;
+  scrollbar-color: #383734 transparent;
 }
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #3f3f3f;
-  border-radius: 8px;
+  background: #383734;
+  border-radius: 9px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #4a4844;
+  background-clip: padding-box;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
@@ -45,7 +73,25 @@ body {
 /* The composer textarea has no border of its own — the rounded container
    around it carries the focus ring, so the inner element must not draw a
    second one on top of it. */
-textarea:focus {
+textarea:focus,
+textarea:focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+/* Native selects render their popup with the OS palette; this at least keeps
+   the closed control consistent with the rest of the chrome. */
+select option {
+  background-color: #201f1e;
+  color: #e4e2dd;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

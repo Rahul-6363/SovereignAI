@@ -2,7 +2,8 @@
 /** Inspector drawer (right): entity details or chat evidence, with preview. */
 import { useState } from "react";
 import type { EntityDetail } from "@/lib/types";
-import { Badge, Button, ConfidenceBar, Spinner, cn } from "./ui";
+import { Badge, ConfidenceBar, IconButton, Spinner, cn } from "./ui";
+import { IconEye, IconX } from "./icons";
 import PidViewer from "./PidViewer";
 
 export default function Inspector({
@@ -25,7 +26,7 @@ export default function Inspector({
         title="Inspector — click an entity, a memory node or an evidence chip"
         className="flex h-full w-9 shrink-0 flex-col items-center gap-2 border-l border-ink-800 bg-ink-950 py-3"
       >
-        <span className="text-sm text-zinc-600">⌕</span>
+        <IconEye size={15} className="text-zinc-600" />
         <span
           className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600"
           style={{ writingMode: "vertical-rl" }}
@@ -42,14 +43,12 @@ export default function Inspector({
         <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
           Inspector
         </span>
-        <Button
-          variant="ghost"
+        <IconButton
+          icon={<IconX size={14} />}
+          label="Close the inspector"
+          size="sm"
           onClick={onClose}
-          title="Close the inspector"
-          className="px-2"
-        >
-          ✕
-        </Button>
+        />
       </div>
 
       {loading && (

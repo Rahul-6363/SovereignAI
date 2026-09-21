@@ -33,7 +33,29 @@ import type {
   EvidencePacket,
   EvidenceSource,
 } from "@/lib/types";
-import { AutoTextarea, ConfidenceBar, CopyButton, Spinner, cn } from "./ui";
+import {
+  AutoTextarea,
+  ConfidenceBar,
+  CopyButton,
+  IconButton,
+  SegmentedControl,
+  Spinner,
+  cn,
+} from "./ui";
+import {
+  IconAlert,
+  IconArrowRight,
+  IconArrowUp,
+  IconBrain,
+  IconCheck,
+  IconCode,
+  IconPaperclip,
+  IconRefresh,
+  IconSchematic,
+  IconSparkles,
+  IconStop,
+  IconX,
+} from "./icons";
 import ActivityTrace from "./ActivityTrace";
 import { DeliverableCards } from "./Deliverables";
 import Markdown from "./Markdown";
@@ -42,32 +64,37 @@ export const CHAT_MODES: ChatModeSpec[] = [
   {
     id: "plant",
     label: "Plant",
-    icon: "◈",
     hint: "Reads this project's drawings and documents. Cites every plant-specific claim, and builds files on request.",
     placeholder: "Ask about this plant — or ask for an excel, a document or a PDF…",
   },
   {
     id: "general",
     label: "General",
-    icon: "✦",
     hint: "The model's own knowledge. No retrieval and no citations — nothing here is about your plant unless you say so.",
     placeholder: "Ask anything…",
   },
   {
     id: "code",
     label: "Code",
-    icon: "⌗",
     hint: "Writes and reviews code. This workstation is air-gapped, so it sticks to the standard library and what you already have.",
     placeholder: "Describe what to build, or paste code to review…",
   },
   {
     id: "think",
     label: "Think",
-    icon: "◍",
     hint: "Works the problem through visibly before answering. Two passes, so roughly twice the wait.",
     placeholder: "Give it something worth working through…",
   },
 ];
+
+/** Mode -> glyph. Separate from the spec because the spec is plain data
+ *  that crosses into `lib/types`, and a React element is not. */
+const MODE_ICON: Record<ChatMode, (p: { size?: number }) => React.ReactElement> = {
+  plant: IconSchematic,
+  general: IconSparkles,
+  code: IconCode,
+  think: IconBrain,
+};
 
 const MODE_BY_ID = new Map(CHAT_MODES.map((m) => [m.id, m]));
 const MODE_STORAGE_KEY = "meshcore.chat.mode";
@@ -995,7 +1022,7 @@ function AssistantTurn({
 
       {m.refused && (
         <div className="mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-amber-400/90">
-          <span aria-hidden>▲</span> Declined on policy
+          <IconAlert size={13} /> Declined on policy
         </div>
       )}
 
@@ -1042,9 +1069,9 @@ function AssistantTurn({
             <button
               onClick={onRetry}
               title="Run this question again"
-              className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-500 transition-colors hover:bg-ink-800 hover:text-zinc-300"
+              className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] text-zinc-500 transition-colors hover:bg-ink-800 hover:text-zinc-300"
             >
-              ↻ Retry
+              <IconRefresh size={13} /> Retry
             </button>
           )}
           {m.mode && m.mode !== "plant" && (
@@ -1085,7 +1112,9 @@ function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-[11px] font-medium text-zinc-400 transition-colors hover:text-zinc-200"
       >
-        <span className={cn("text-accent", live && "animate-pulse-dot")}>◍</span>
+        <span className={cn("text-accent", live && "animate-pulse-dot")}>
+          <IconBrain size={14} />
+        </span>
         {live ? "Thinking…" : "Thought process"}
         <span className="ml-auto text-zinc-600">{open ? "−" : "+"}</span>
       </button>
@@ -1116,8 +1145,19 @@ function TraceDisclosure({ steps }: { steps: ActivityStep[] }) {
         onClick={() => setOpen((v) => !v)}
         className="inline-flex items-center gap-1.5 rounded-md text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
       >
-        <span className={cn(failed ? "text-rose-400" : "text-zinc-600")}>
-          {running ? "◌" : failed ? "✕" : "✓"}
+        <span
+          className={cn(
+            "grid place-items-center",
+            failed ? "text-rose-400" : running ? "text-amber-400" : "text-zinc-600",
+          )}
+        >
+          {running ? (
+            <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-current" />
+          ) : failed ? (
+            <IconX size={12} />
+          ) : (
+            <IconCheck size={12} />
+          )}
         </span>
         {running
           ? `${done}/${steps.length} steps`
@@ -1141,18 +1181,19 @@ function EmptyThread({
   onStarter: (s: string) => void;
   streaming: boolean;
 }) {
+  const Icon = MODE_ICON[spec.id];
   return (
     <div className="flex min-h-full items-center">
       <div className={cn(COLUMN, "py-12")}>
-        <div className="mb-2 flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/15 text-base text-accent">
-            {spec.icon}
+        <div className="mb-3 flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-accent/12 text-accent">
+            <Icon size={19} />
           </span>
-          <h2 className="text-2xl font-medium tracking-tight text-zinc-100">
+          <h2 className="text-[26px] font-medium tracking-tight text-zinc-100">
             {spec.label} mode
           </h2>
         </div>
-        <p className="mb-6 max-w-xl text-[15px] leading-relaxed text-zinc-500">
+        <p className="mb-7 max-w-xl text-[15px] leading-relaxed text-zinc-500">
           {spec.hint}
         </p>
         <div className="flex flex-col items-start gap-1.5">
@@ -1164,9 +1205,10 @@ function EmptyThread({
               className="group/s flex w-full items-center gap-2 rounded-xl border border-ink-800 px-3.5 py-2.5 text-left text-sm text-zinc-400 transition-colors hover:border-ink-600 hover:bg-ink-850 hover:text-zinc-200 disabled:opacity-40"
             >
               <span className="min-w-0 flex-1">{s}</span>
-              <span className="shrink-0 text-zinc-700 transition-colors group-hover/s:text-accent">
-                →
-              </span>
+              <IconArrowRight
+                size={14}
+                className="shrink-0 text-zinc-700 transition-colors group-hover/s:text-accent"
+              />
             </button>
           ))}
         </div>
@@ -1196,7 +1238,7 @@ function ContextBadge({ report }: { report: ContextReport }) {
         ctx {pct}% · {report.evidence_kept}/{report.evidence_total} src
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 z-10 mb-1 w-72 rounded-xl border border-ink-700 bg-ink-850 p-3 text-left shadow-xl">
+        <div className="absolute bottom-full right-0 z-10 mb-1 w-72 animate-slide-up rounded-2xl border border-ink-700 bg-ink-850 p-3 text-left shadow-pop">
           <div className="mb-1.5 text-[11px] font-semibold text-zinc-300">
             Context window
           </div>
@@ -1455,7 +1497,7 @@ function Composer({
             if (!streaming) send(input);
           }}
           className={cn(
-            "rounded-2xl border bg-ink-850 shadow-lg transition-colors",
+            "rounded-2xl border bg-ink-850 shadow-panel transition-colors",
             streaming
               ? "border-ink-800 opacity-70"
               : willBuild
@@ -1482,15 +1524,19 @@ function Composer({
           />
 
           <div className="flex items-center gap-2 px-2.5 pb-2.5 pt-1">
-            <button
-              type="button"
-              onClick={onAttachClick}
+            <IconButton
+              icon={
+                attaching ? (
+                  <Spinner className="h-4 w-4" />
+                ) : (
+                  <IconPaperclip size={16} />
+                )
+              }
+              label="Attach a PDF or drawing to this project"
+              size="sm"
               disabled={attaching || streaming}
-              title="Attach a PDF or drawing to this project"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-500 transition-colors hover:bg-ink-800 hover:text-accent disabled:opacity-40"
-            >
-              {attaching ? <Spinner className="h-4 w-4" /> : "+"}
-            </button>
+              onClick={onAttachClick}
+            />
 
             <ModeSwitch mode={mode} setMode={setMode} disabled={streaming} />
 
@@ -1501,14 +1547,13 @@ function Composer({
                 </span>
               )}
               {streaming ? (
-                <button
-                  type="button"
+                <IconButton
+                  icon={<IconStop size={14} />}
+                  label="Stop generating"
+                  size="sm"
+                  variant="outline"
                   onClick={stop}
-                  title="Stop generating"
-                  className="grid h-8 w-8 place-items-center rounded-lg border border-ink-600 text-xs text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100"
-                >
-                  ■
-                </button>
+                />
               ) : (
                 <button
                   type="submit"
@@ -1518,9 +1563,9 @@ function Composer({
                       ? `Build a ${format} and file it under Deliverables`
                       : "Send"
                   }
-                  className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-sm font-semibold text-white transition-colors hover:bg-accent-soft disabled:bg-ink-700 disabled:text-zinc-600"
+                  className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-white shadow-raised transition-colors hover:bg-accent-soft disabled:bg-ink-800 disabled:text-zinc-700"
                 >
-                  ↑
+                  <IconArrowUp size={16} />
                 </button>
               )}
             </div>
@@ -1543,7 +1588,12 @@ function Composer({
   );
 }
 
-/** Segmented mode control. */
+/** Segmented mode control.
+ *
+ *  Uses the shared primitive rather than a private copy, so the chat mode
+ *  switch and the deliverables type filter cannot drift into two different
+ *  looking controls doing the same job.
+ */
 function ModeSwitch({
   mode,
   setMode,
@@ -1554,34 +1604,21 @@ function ModeSwitch({
   disabled: boolean;
 }) {
   return (
-    <div
-      role="tablist"
-      aria-label="Chat mode"
-      className="flex items-center gap-0.5 rounded-lg bg-ink-900/70 p-0.5"
-    >
-      {CHAT_MODES.map((m) => {
-        const active = m.id === mode;
-        return (
-          <button
-            key={m.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            disabled={disabled}
-            onClick={() => setMode(m.id)}
-            title={m.hint}
-            className={cn(
-              "rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50",
-              active
-                ? "bg-ink-700 text-zinc-100"
-                : "text-zinc-500 hover:text-zinc-300",
-            )}
-          >
-            <span className="mr-1 text-[10px] text-accent">{m.icon}</span>
-            {m.label}
-          </button>
-        );
+    <SegmentedControl
+      size="sm"
+      value={mode}
+      onChange={setMode}
+      disabled={disabled}
+      ariaLabel="Chat mode"
+      options={CHAT_MODES.map((m) => {
+        const Icon = MODE_ICON[m.id];
+        return {
+          value: m.id,
+          label: m.label,
+          title: m.hint,
+          icon: <Icon size={13} />,
+        };
       })}
-    </div>
+    />
   );
 }

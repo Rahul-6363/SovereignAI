@@ -10,7 +10,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { Project } from "@/lib/types";
-import { Button, Spinner, cn } from "./ui";
+import { Badge, Button, Input, Select, cn } from "./ui";
+import { IconArrowRight, IconPlus, IconSchematic } from "./icons";
 
 export default function PidEntryCard({
   projects,
@@ -60,56 +61,70 @@ export default function PidEntryCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-accent/50 bg-accent/[0.06] p-4",
+        "rounded-2xl border border-accent/30 bg-accent/[0.05] p-4",
         className,
       )}
     >
-      <div className="mb-1 flex items-center gap-2">
-        <span className="grid h-6 w-6 place-items-center rounded-md bg-accent/20 text-xs text-accent">
-          
+      <div className="mb-1.5 flex items-center gap-2.5">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-accent/15 text-accent">
+          <IconSchematic size={16} />
         </span>
-        <span className="text-sm font-medium text-zinc-100">
+        <span className="text-[15px] font-medium text-zinc-100">
           Open the P&amp;ID capability
         </span>
-        <span className="ml-auto rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
-          completed module
-        </span>
+        <Badge color="accent" className="ml-auto">
+          complete
+        </Badge>
       </div>
-      <p className="mb-3 text-[11px] leading-relaxed text-zinc-500">
-        Routes straight into the existing P&amp;ID upload, extraction, review and
-        result flow. Nothing is rebuilt here.
+      <p className="mb-4 text-[12px] leading-relaxed text-zinc-500">
+        Routes straight into the P&amp;ID upload, extraction, review and result
+        flow. Nothing is rebuilt here.
       </p>
 
       {projects.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
-          <select
+          <Select
             value={projectId ?? ""}
-            onChange={(e) => setProjectId(Number(e.target.value))}
-            className="min-w-[190px] flex-1 rounded-lg border border-ink-600 bg-ink-900 px-2.5 py-2 text-xs text-zinc-200 focus:border-accent focus:outline-none"
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.stats.documents > 0
+            onChange={(v) => setProjectId(Number(v))}
+            ariaLabel="Project to open"
+            className="h-9 min-w-[190px] flex-1"
+            options={projects.map((p) => ({
+              value: p.id,
+              label:
+                p.name +
+                (p.stats.documents > 0
                   ? ` · ${p.stats.documents} drawing${p.stats.documents === 1 ? "" : "s"}`
-                  : " · empty"}
-              </option>
-            ))}
-          </select>
-          <Button variant="primary" onClick={() => void submit()} disabled={busy}>
-            {busy ? <Spinner /> : "→"} Open P&amp;ID interface
+                  : " · empty"),
+            }))}
+          />
+          <Button
+            variant="primary"
+            loading={busy}
+            iconRight={<IconArrowRight size={15} />}
+            onClick={() => void submit()}
+          >
+            Open P&amp;ID
           </Button>
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <input
+          <Input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={setName}
+            ariaLabel="New project name"
             placeholder="e.g. Refinery Unit A"
-            className="min-w-[190px] flex-1 rounded-lg border border-ink-600 bg-ink-900 px-2.5 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-accent focus:outline-none"
+            className="min-w-[190px] flex-1"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submit();
+            }}
           />
-          <Button variant="primary" onClick={() => void submit()} disabled={busy}>
-            {busy ? <Spinner /> : "+"} Create project &amp; open P&amp;ID
+          <Button
+            variant="primary"
+            loading={busy}
+            icon={<IconPlus size={15} />}
+            onClick={() => void submit()}
+          >
+            Create &amp; open
           </Button>
         </div>
       )}

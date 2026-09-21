@@ -8,7 +8,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { cn } from "./ui";
+import { Badge, IconButton, cn } from "./ui";
+import { IconLock, IconX } from "./icons";
 
 interface TripwireEntry {
   at: string;
@@ -63,46 +64,37 @@ export default function EgressCounter({ className }: { className?: string }) {
   return (
     <div className={cn("relative", className)}>
       <div className="flex items-center gap-1.5">
-        <span
+        <button
+          onClick={() => setOpen((v) => !v)}
           title="Outbound network attempts observed this session"
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-            blocked === null
-              ? "border-ink-600 text-zinc-500"
-              : blocked
-                ? "border-emerald-900 bg-emerald-950/40 text-emerald-300"
-                : "border-rose-900 bg-rose-950/40 text-rose-300",
-          )}
+          aria-label={`Egress attempts: ${total}. Open the tripwire log.`}
         >
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              blocked ? "animate-pulse-dot bg-emerald-400" : "bg-rose-500",
-            )}
-          />
-          egress {total}
-        </span>
+          <Badge color={blocked === false ? "red" : "green"} dot>
+            <IconLock size={11} />
+            egress {total}
+          </Badge>
+        </button>
         <button
           onClick={() => void tripwire()}
           title="Fire the deliberate egress tripwire — blocked and logged"
-          className="rounded-full border border-amber-900/70 bg-amber-950/30 px-2 py-0.5 text-[11px] font-medium text-amber-300 transition-colors hover:bg-amber-950/60"
+          className="rounded-full border border-amber-900/60 bg-amber-950/30 px-2 py-0.5 text-[11px] font-medium text-amber-300 transition-colors hover:bg-amber-950/60"
         >
-          test egress
+          test
         </button>
       </div>
 
       {open && (
-        <div className="absolute right-0 top-8 z-40 w-[330px] rounded-xl border border-ink-700 bg-ink-950 p-3 text-[11px] shadow-xl">
+        <div className="absolute right-0 top-9 z-40 w-[330px] animate-slide-up rounded-2xl border border-ink-700 bg-ink-950 p-3.5 text-[11px] shadow-pop">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-semibold uppercase tracking-wider text-zinc-500">
               Egress tripwire log
             </span>
-            <button
+            <IconButton
+              icon={<IconX size={13} />}
+              label="Close tripwire log"
+              size="sm"
               onClick={() => setOpen(false)}
-              className="rounded px-1 text-zinc-500 hover:text-zinc-200"
-            >
-              ✕
-            </button>
+            />
           </div>
           <p className="mb-2 leading-relaxed text-zinc-500">
             Default-deny: only the loopback API is reachable. Every refused

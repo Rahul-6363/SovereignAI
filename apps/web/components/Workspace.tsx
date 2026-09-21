@@ -26,7 +26,25 @@ import type {
   RelationshipRec,
   WorkspaceView,
 } from "@/lib/types";
-import { Badge, Button, EmptyState, cn } from "./ui";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  IconButton,
+  SearchInput,
+  cn,
+} from "./ui";
+import {
+  IconAlert,
+  IconCheck,
+  IconChevronLeft,
+  IconChevronRight,
+  IconHome,
+  IconMessage,
+  IconPlus,
+  IconRefresh,
+  IconShieldCheck,
+} from "./icons";
 import Sidebar from "./Sidebar";
 import ChatPane from "./ChatPane";
 import MemoryPane from "./MemoryPane";
@@ -37,14 +55,6 @@ import WorkspaceOverview from "./WorkspaceOverview";
 import DeliverablesPane from "./Deliverables";
 import EgressCounter from "./EgressCounter";
 import ConversationRail from "./ConversationRail";
-
-const VIEWS: { id: WorkspaceView; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "chat", label: "Agent chat" },
-  { id: "pid", label: "P&ID" },
-  { id: "memory", label: "Plant Memory" },
-  { id: "deliverables", label: "Deliverables" },
-];
 
 export default function Workspace({
   projectId,
@@ -253,6 +263,16 @@ export default function Workspace({
     [],
   );
 
+  // Opening a blank thread is three state changes that must happen together:
+  // clear the selection, tell the rail to re-read, and make sure the chat
+  // view is the one on screen. Doing it in one place is why the sidebar, the
+  // rail and the header can all offer it without drifting apart.
+  const startNewChat = useCallback(() => {
+    setActiveConversationId(null);
+    setRailVersion((v) => v + 1);
+    setTab("chat");
+  }, []);
+
   const onDocDeleted = useCallback((docId: number) => {
     setDocs((prev) => prev.filter((d) => d.id !== docId));
     setActiveDocId((cur) => (cur === docId ? null : cur));
@@ -266,61 +286,36 @@ export default function Workspace({
     ? entities.filter((e) => e.page_id === activePage.id)
     : entities;
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-ink-900">
       <Sidebar
         projects={projects}
         projectId={projectId}
+        view={tab}
+        onView={setTab}
         docs={docs}
         activeDocId={activeDocId}
         onSelectDoc={(d) => setActiveDocId(d.id)}
         onIngested={onIngested}
         onDocDeleted={onDocDeleted}
         onOpenTrust={() => setTrustOpen(true)}
+        onNewChat={startNewChat}
         localOk={localOk}
+        counts={{
+          conversations: conversationCount,
+          deliverables: deliverables.length,
+        }}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        {/* Meshcore capability bar */}
-        <div className="flex items-center gap-0.5 border-b border-ink-800 bg-ink-900 px-3 py-2">
-          <Link
-            href="/"
-            title="Return to the main Meshcore workspace"
-            className="mr-1 rounded-lg px-2 py-1.5 text-sm text-zinc-500 transition-colors hover:bg-ink-850 hover:text-zinc-200"
-          >
-            ← Meshcore
-          </Link>
-          <span className="mr-2 h-4 w-px bg-ink-800" />
-          {VIEWS.map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-sm transition-colors",
-                tab === id
-                  ? "bg-ink-800 font-medium text-zinc-100"
-                  : "text-zinc-500 hover:bg-ink-850 hover:text-zinc-300",
-              )}
-            >
-              {label}
-              {id === "pid" && (
-                <span
-                  aria-hidden
-                  className={cn(
-                    "ml-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle",
-                    tab === id ? "bg-accent" : "bg-emerald-500/70",
-                  )}
-                />
-              )}
-            </button>
-          ))}
-          <div className="ml-auto flex items-center gap-2">
-            <Badge color="violet">local-only</Badge>
-            <EgressCounter />
-            <Button variant="outline" onClick={() => setTrustOpen(true)}>
-              Trust
-            </Button>
-          </div>
-        </div>
+        <WorkspaceHeader
+          projectName={projects.find((p) => p.id === projectId)?.name ?? ""}
+          view={tab}
+          onView={setTab}
+          onOpenTrust={() => setTrustOpen(true)}
+          onNewChat={startNewChat}
+          onRefresh={() => setLocalVersion((v) => v + 1)}
+          docCount={docs.length}
+        />
 
         {/* active capability */}
         <div className="min-h-0 flex-1">
@@ -342,7 +337,7 @@ export default function Workspace({
               projectId={projectId}
               activeId={activeConversationId}
               onSelect={setActiveConversationId}
-              onNew={() => setActiveConversationId(null)}
+              onNew={startNewChat}
               refreshKey={railVersion}
             />
             <div className="min-w-0 flex-1">
@@ -367,35 +362,17 @@ export default function Workspace({
           </div>
           {tab === "pid" && (
             <div className="flex h-full min-h-0 flex-col">
-              {/* Boundary banner: this IS the completed P&ID module. */}
-              <div className="flex flex-wrap items-center gap-2 border-b border-ink-800 bg-accent/[0.06] px-4 py-2 text-[11px] text-zinc-400">
-                <span className="text-accent">
-                  P&amp;ID capability — completed module.
-                </span>
-                <span>
-                  Upload on the left; processing, extraction, review and results
-                  run through this existing interface.
-                </span>
-                <button
-                  onClick={() => setTab("chat")}
-                  className="ml-auto rounded-md border border-accent/50 px-2 py-0.5 text-accent transition-colors hover:bg-accent/10"
-                >
-                  Continue in agent chat →
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">
-                <ExplorerPane
-                  pages={pages}
-                  pageIndex={pageIndex}
-                  onPageChange={setPageIndex}
-                  activePage={activePage}
-                  entities={pageEntities}
-                  totalEntities={entities.length}
-                  relationships={relationships}
-                  selectedEntityId={selectedEntityId}
-                  onSelectEntity={(e) => openEntityDetail(e.id)}
-                />
-              </div>
+              <ExplorerPane
+                pages={pages}
+                pageIndex={pageIndex}
+                onPageChange={setPageIndex}
+                activePage={activePage}
+                entities={pageEntities}
+                totalEntities={entities.length}
+                relationships={relationships}
+                selectedEntityId={selectedEntityId}
+                onSelectEntity={(e) => openEntityDetail(e.id)}
+              />
             </div>
           )}
           {tab === "memory" && (
@@ -484,15 +461,14 @@ function ExplorerPane({
       <div className="flex min-w-0 flex-1 flex-col">
         {pages.length > 1 && (
           <div className="flex items-center gap-2 border-b border-ink-800 bg-ink-900 px-3 py-1.5">
-            <Button
+            <IconButton
+              icon={<IconChevronLeft size={15} />}
+              label="Previous page"
+              size="sm"
               variant="outline"
-              className="px-2 py-1 text-xs"
               disabled={pageIndex === 0}
               onClick={() => onPageChange(pageIndex - 1)}
-              title="Previous page"
-            >
-              ←
-            </Button>
+            />
             <div className="flex min-w-0 gap-1 overflow-x-auto">
               {pages.map((p, i) => (
                 <button
@@ -509,15 +485,14 @@ function ExplorerPane({
                 </button>
               ))}
             </div>
-            <Button
+            <IconButton
+              icon={<IconChevronRight size={15} />}
+              label="Next page"
+              size="sm"
               variant="outline"
-              className="px-2 py-1 text-xs"
               disabled={pageIndex >= pages.length - 1}
               onClick={() => onPageChange(pageIndex + 1)}
-              title="Next page"
-            >
-              →
-            </Button>
+            />
             <span className="ml-auto shrink-0 font-mono text-[10px] text-zinc-600">
               page {activePage.page_number} of {pages.length}
             </span>
@@ -555,24 +530,29 @@ function ExplorerPane({
               </span>
             )}
           </div>
-          <input
+          <SearchInput
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={setQuery}
             placeholder="Filter tag or label…"
-            className="mb-1.5 w-full rounded-lg border border-ink-600 bg-ink-850 px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:border-accent focus:outline-none"
+            ariaLabel="Filter entities"
+            className="mb-1.5"
           />
           {reviewCount > 0 && (
             <button
               onClick={() => setReviewOnly((v) => !v)}
               title="A validation rule fired on these — they are not settled fact"
               className={cn(
-                "mb-1.5 w-full rounded-lg border px-2 py-1 text-left text-[11px] transition-colors",
+                "mb-1.5 flex w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-[11px] transition-colors",
                 reviewOnly
-                  ? "border-amber-700 bg-amber-950/40 text-amber-300"
-                  : "border-ink-600 text-zinc-500 hover:text-amber-300",
+                  ? "border-amber-800 bg-amber-950/40 text-amber-300"
+                  : "border-ink-700 text-zinc-500 hover:border-ink-600 hover:text-amber-300",
               )}
             >
-              {reviewOnly ? "✓ " : ""}⚠ {reviewCount} need review
+              <IconAlert size={12} className="shrink-0" />
+              {reviewCount} need review
+              {reviewOnly && (
+                <IconCheck size={12} className="ml-auto shrink-0" />
+              )}
             </button>
           )}
           {types.length > 1 && (
@@ -658,5 +638,114 @@ function ExplorerPane({
         </div>
       </div>
     </div>
+  );
+}
+
+/** App chrome for the active view.
+ *
+ *  Deliberately thin. This bar carries where-you-are (breadcrumb) and the
+ *  things that are true everywhere (egress counter, trust, shortcuts); each
+ *  pane keeps its own toolbar for actions that only make sense inside it.
+ *  Collapsing both into one bar was the obvious move and the wrong one — it
+ *  put "Download all" next to "Meshcore" and made the chrome jump every time
+ *  the view changed.
+ */
+const VIEW_TITLE: Record<WorkspaceView, string> = {
+  overview: "Overview",
+  chat: "Agent chat",
+  pid: "P&ID",
+  memory: "Plant Memory",
+  deliverables: "Deliverables",
+};
+
+function WorkspaceHeader({
+  projectName,
+  view,
+  onView,
+  onOpenTrust,
+  onNewChat,
+  onRefresh,
+  docCount,
+}: {
+  projectName: string;
+  view: WorkspaceView;
+  onView: (v: WorkspaceView) => void;
+  onOpenTrust: () => void;
+  onNewChat: () => void;
+  onRefresh: () => void;
+  docCount: number;
+}) {
+  return (
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-ink-800 bg-ink-900 px-4">
+      {/* breadcrumb */}
+      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2">
+        <Link
+          href="/"
+          className="shrink-0 rounded-lg p-1 text-zinc-600 transition-colors hover:bg-ink-850 hover:text-zinc-300"
+          title="Meshcore home"
+        >
+          <IconHome size={15} />
+        </Link>
+        <span className="shrink-0 text-zinc-700">/</span>
+        {projectName && (
+          <>
+            <span className="max-w-[14rem] truncate text-[13px] text-zinc-500">
+              {projectName}
+            </span>
+            <span className="shrink-0 text-zinc-700">/</span>
+          </>
+        )}
+        <h1 className="shrink-0 text-[13px] font-medium text-zinc-100">
+          {VIEW_TITLE[view]}
+        </h1>
+      </nav>
+
+      {/* view-scoped shortcut: the one action most likely wanted next */}
+      <div className="ml-3 flex items-center gap-1.5">
+        {view === "chat" && (
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<IconPlus size={14} />}
+            onClick={onNewChat}
+          >
+            New chat
+          </Button>
+        )}
+        {view === "pid" && docCount === 0 && (
+          <span className="text-[11px] text-amber-300/90">
+            Upload a drawing in the Files rail to begin
+          </span>
+        )}
+        {view === "pid" && docCount > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<IconMessage size={14} />}
+            onClick={() => onView("chat")}
+          >
+            Ask about this drawing
+          </Button>
+        )}
+      </div>
+
+      <div className="ml-auto flex items-center gap-1.5">
+        <EgressCounter />
+        <IconButton
+          icon={<IconRefresh size={15} />}
+          label="Reload project data"
+          size="sm"
+          onClick={onRefresh}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          icon={<IconShieldCheck size={14} />}
+          onClick={onOpenTrust}
+        >
+          Trust
+        </Button>
+      </div>
+    </header>
   );
 }

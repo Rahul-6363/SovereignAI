@@ -22,9 +22,9 @@ export default async function MeshcoreHomePage() {
       <WorkspaceHome projects={projects} conversations={conversations} />
       {offline && (
         <div className="mx-auto max-w-5xl px-6 pb-10">
-          <div className="rounded-xl border border-rose-900/50 bg-rose-950/30 p-4 text-sm text-rose-300">
+          <div className="rounded-2xl border border-rose-900/50 bg-rose-950/30 p-4 text-[13px] text-rose-300">
             API is unreachable. Start it with{" "}
-            <code className="rounded bg-ink-700 px-1.5 py-0.5 font-mono text-xs">
+            <code className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[11px]">
               python -m uvicorn app.main:app --reload
             </code>{" "}
             in <code className="font-mono text-xs">apps/api</code>.

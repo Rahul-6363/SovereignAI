@@ -5,10 +5,18 @@
  * Clicking a node (a) shows its drawing bbox in the preview pane and
  * (b) opens the inspector for full details.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { EntityDetail, EntityRec, MemoryGraph } from "@/lib/types";
-import { Badge, Button, ConfidenceBar, EmptyState, Spinner } from "./ui";
+import {
+  Badge,
+  Button,
+  ConfidenceBar,
+  EmptyState,
+  IconButton,
+  Spinner,
+} from "./ui";
+import { IconGraph, IconRefresh } from "./icons";
 import PidViewer from "./PidViewer";
 
 interface Positioned {
@@ -42,17 +50,24 @@ export default function MemoryPane({
   const [positions, setPositions] = useState<Positioned[]>([]);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
 
+  const [reloading, setReloading] = useState(false);
+
   // load graph
-  useEffect(() => {
-    (async () => {
-      try {
-        setGraph(await api.projectGraph(projectId));
-        setError("");
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
+  const loadGraph = useCallback(async () => {
+    setReloading(true);
+    try {
+      setGraph(await api.projectGraph(projectId));
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReloading(false);
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    void loadGraph();
+  }, [loadGraph]);
 
   // seed positions + run force simulation
   useEffect(() => {
@@ -169,8 +184,20 @@ export default function MemoryPane({
   if (graph.nodes.length === 0) {
     return (
       <EmptyState
-        title="No memory yet"
-        hint="Ingest a P&ID to build the plant memory graph."
+        icon={<IconGraph size={18} />}
+        title="No plant memory yet"
+        hint="Upload a P&ID in the Files rail. Once it finishes extracting, every tag, instrument and connection on it appears here as a graph you can query."
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<IconRefresh size={14} />}
+            loading={reloading}
+            onClick={() => void loadGraph()}
+          >
+            Check again
+          </Button>
+        }
       />
     );
   }
@@ -274,12 +301,21 @@ export default function MemoryPane({
             );
           })}
         </svg>
-        <div className="absolute left-3 top-3 flex items-center gap-2">
+        <div className="absolute left-3 right-3 top-3 flex items-center gap-2">
           <Badge color="zinc">{graph.nodes.length} entities</Badge>
           <Badge color="zinc">{graph.edges.length} links</Badge>
           <span className="text-[10px] text-zinc-600">
             drag nodes · click to inspect
           </span>
+          <IconButton
+            icon={<IconRefresh size={15} />}
+            label="Reload the plant memory graph"
+            size="sm"
+            variant="subtle"
+            disabled={reloading}
+            onClick={() => void loadGraph()}
+            className="ml-auto"
+          />
         </div>
         {detailLoading && (
           <div className="absolute right-3 top-3 flex items-center gap-2 text-xs text-zinc-500">
@@ -316,6 +352,7 @@ export default function MemoryPane({
             <div className="mt-2 flex gap-2">
               <Button
                 variant="outline"
+                size="sm"
                 onClick={() => selected && selectNode({
                   id: selected,
                   x: 0, y: 0, vx: 0, vy: 0, node: selectedNode,

@@ -2,7 +2,8 @@
 /** P&ID page viewer with an SVG overlay for 0..1 fraction bounding boxes. */
 import { useState } from "react";
 import type { EntityRec } from "@/lib/types";
-import { Badge, cn } from "./ui";
+import { Badge, Button, cn } from "./ui";
+import { IconEye } from "./icons";
 
 export default function PidViewer({
   imageUrl,
@@ -32,15 +33,19 @@ export default function PidViewer({
         <span className="text-xs font-medium text-zinc-400">P&ID view</span>
         <div className="ml-auto flex items-center gap-2">
           {label && valid && (
-            <Badge color="amber">▣ {label} highlighted</Badge>
+            <Badge color="amber" dot>
+              {label} highlighted
+            </Badge>
           )}
           {entities.length > 0 && (
-            <button
+            <Button
+              variant="outline"
+              size="sm"
+              icon={<IconEye size={13} />}
               onClick={() => setShowAll((v) => !v)}
-              className="rounded-md border border-ink-600 px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-ink-700 hover:text-zinc-200"
             >
               {showAll ? "Hide all boxes" : "Show all boxes"}
-            </button>
+            </Button>
           )}
         </div>
       </div>

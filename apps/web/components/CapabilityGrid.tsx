@@ -5,8 +5,33 @@
  * *existing* P&ID upload/processing interface — the new home screen never
  * duplicates the P&ID workflow (README §0.1).
  */
+import type { ReactElement } from "react";
 import type { Capability, CapabilityStatus } from "@/lib/types";
-import { cn } from "./ui";
+import { Badge, cn } from "./ui";
+import {
+  IconCode,
+  IconGraph,
+  IconMessage,
+  IconSchematic,
+  IconShieldCheck,
+  IconSigma,
+  IconLock,
+  IconTable,
+} from "./icons";
+
+/** id -> glyph. Kept beside the grid rather than on the `Capability`
+ *  record because the record is data (it crosses the type boundary in
+ *  `lib/types`), and a React element is not. */
+const CAPABILITY_ICON: Record<string, (p: { size?: number }) => ReactElement> = {
+  pid: IconSchematic,
+  agent: IconMessage,
+  memory: IconGraph,
+  deliverables: IconTable,
+  calculate: IconSigma,
+  retrieval: IconLock,
+  trust: IconShieldCheck,
+  sandbox: IconCode,
+};
 
 /** Single source of truth for capability + maturity, matching README §7. */
 export const CAPABILITIES: Capability[] = [
@@ -16,7 +41,6 @@ export const CAPABILITIES: Capability[] = [
     blurb:
       "Upload a drawing; symbols, tags and connections become a typed, queryable graph.",
     status: "available",
-    icon: "",
   },
   {
     id: "agent",
@@ -24,7 +48,6 @@ export const CAPABILITIES: Capability[] = [
     blurb:
       "Ask in plain language. Grounded answers with a visible tool/activity trace.",
     status: "available",
-    icon: "✦",
   },
   {
     id: "memory",
@@ -32,7 +55,6 @@ export const CAPABILITIES: Capability[] = [
     blurb:
       "Explore equipment, lines and instruments. Every node carries a confidence score.",
     status: "available",
-    icon: "⬡",
   },
   {
     id: "deliverables",
@@ -40,7 +62,6 @@ export const CAPABILITIES: Capability[] = [
     blurb:
       "Ask in plain language and get a real XLSX, DOCX or PDF with citations — not a chat reply to copy out by hand.",
     status: "available",
-    icon: "▤",
   },
   {
     id: "calculate",
@@ -48,15 +69,13 @@ export const CAPABILITIES: Capability[] = [
     blurb:
       "Typed calculation requests run in a unit-checked engine. The model never does arithmetic.",
     status: "phase2",
-    icon: "∑",
   },
   {
     id: "retrieval",
     name: "Clearance-aware retrieval",
     blurb:
       "ACL applied as an index pre-filter, so a lower clearance cannot leak restricted content.",
-    status: "phase2",
-    icon: "⛨",
+    status: "phase1",
   },
   {
     id: "trust",
@@ -64,7 +83,6 @@ export const CAPABILITIES: Capability[] = [
     blurb:
       "Default-deny egress with a live attempt counter, hash-chained audit trail.",
     status: "available",
-    icon: "▲",
   },
   {
     id: "sandbox",
@@ -72,40 +90,25 @@ export const CAPABILITIES: Capability[] = [
     blurb:
       "Generated code runs in a network-isolated sandbox with a read-only filesystem.",
     status: "phase2",
-    icon: "▣",
   },
 ];
 
-const STATUS_STYLE: Record<CapabilityStatus, { label: string; cls: string }> = {
-  available: {
-    label: "Available now",
-    cls: "border-emerald-900 bg-emerald-950/40 text-emerald-300",
-  },
-  phase1: {
-    label: "Phase 1",
-    cls: "border-amber-900 bg-amber-950/40 text-amber-300",
-  },
-  phase2: {
-    label: "Phase 2",
-    cls: "border-zinc-700 bg-ink-800 text-zinc-400",
-  },
-  planned: {
-    label: "Roadmap",
-    cls: "border-zinc-700 bg-ink-800 text-zinc-500",
-  },
+const STATUS_STYLE: Record<
+  CapabilityStatus,
+  { label: string; color: "green" | "amber" | "zinc"; dot: boolean }
+> = {
+  available: { label: "Available", color: "green", dot: true },
+  phase1: { label: "Phase 1", color: "amber", dot: false },
+  phase2: { label: "Phase 2", color: "zinc", dot: false },
+  planned: { label: "Roadmap", color: "zinc", dot: false },
 };
 
 export function CapabilityStatusBadge({ status }: { status: CapabilityStatus }) {
   const s = STATUS_STYLE[status];
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium",
-        s.cls,
-      )}
-    >
+    <Badge color={s.color} dot={s.dot}>
       {s.label}
-    </span>
+    </Badge>
   );
 }
 
@@ -129,44 +132,49 @@ export default function CapabilityGrid({
   return (
     <div className={cn("grid grid-cols-1 gap-2.5", cols, className)}>
       {capabilities.map((c) => {
-        const isPid = c.id === "pid";
+        const Icon = CAPABILITY_ICON[c.id];
+        const live = c.status === "available";
         return (
           <button
             key={c.id}
             onClick={() => onSelect(c.id)}
             className={cn(
-              "group flex flex-col items-start gap-1.5 rounded-xl border p-3.5 text-left transition-colors",
-              isPid
-                ? "border-accent/50 bg-accent/[0.07] hover:border-accent"
-                : "border-ink-700 bg-ink-850 hover:border-ink-600",
+              "group flex h-full flex-col items-start gap-2 rounded-2xl border p-4 text-left transition-colors",
+              live
+                ? "border-ink-800 bg-ink-850 shadow-raised hover:border-ink-700 hover:bg-ink-800/70"
+                : "border-dashed border-ink-800 bg-transparent hover:border-ink-700",
             )}
           >
-            <div className="flex w-full items-center gap-2">
+            <div className="flex w-full items-center gap-2.5">
               <span
                 className={cn(
-                  "grid h-6 w-6 shrink-0 place-items-center rounded-md text-xs",
-                  isPid ? "bg-accent/20 text-accent" : "bg-ink-700 text-zinc-400",
+                  "grid h-8 w-8 shrink-0 place-items-center rounded-xl",
+                  live
+                    ? "bg-accent/12 text-accent"
+                    : "bg-ink-850 text-zinc-600",
                 )}
               >
-                {c.icon}
+                {Icon ? <Icon size={16} /> : null}
               </span>
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-100">
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-[13px] font-medium",
+                  live ? "text-zinc-100" : "text-zinc-400",
+                )}
+              >
                 {c.name}
               </span>
-              {isPid && (
-                <span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
-                  first-class
-                </span>
-              )}
             </div>
-            <p className="text-[11px] leading-relaxed text-zinc-500">
+            <p className="text-[12px] leading-relaxed text-zinc-500">
               {c.blurb}
             </p>
-            <div className="mt-1 flex w-full items-center">
+            <div className="mt-auto flex w-full items-center pt-1.5">
               <CapabilityStatusBadge status={c.status} />
-              <span className="ml-auto text-[11px] text-zinc-600 transition-colors group-hover:text-accent">
-                open →
-              </span>
+              {live && (
+                <span className="ml-auto text-[11px] text-zinc-700 transition-colors group-hover:text-accent">
+                  Open
+                </span>
+              )}
             </div>
           </button>
         );
